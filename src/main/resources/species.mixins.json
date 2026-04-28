@@ -11,7 +11,10 @@
     "AgeableMobMixin",
     "BlockEntityTypeMixin",
     "EmeraldsForVillagerTypeItemMixin",
+    "EnderDragonMixin",
     "FlowerPotBlockMixin",
+    "alexscaves.EntityVesperMixin",
+    "iceandfire.EntityHippogryphMixin",
     "ItemMixin",
     "LightningRodMixin",
     "LivingEntityMixin",
@@ -26,13 +29,24 @@
   ],
   "client": [
     "client.AbstractClientPlayerMixin",
+    "client.CameraMixin",
+    "client.ClientLevelMixin",
     "client.CustomHeadLayerMixin",
+    "client.EntityGlowColorMixin",
     "client.EntityRenderDispatcherMixin",
     "client.InventoryScreenMixin",
     "client.ItemInHandRendererMixin",
+    "client.LivingEntityRendererCosmeticMixin",
     "client.PlayerRendererMixin",
+    "client.SingleQuadParticleMixin",
     "client.VillagerProfessionLayerMixin",
-    "client.WolfRendererMixin"
+    "client.WolfRendererMixin",
+    "client.alexscaves.BoundroidEntityMixin",
+    "client.alexscaves.BoundroidWinchEntityMixin",
+    "client.alexscaves.GossamerWormRendererMixin",
+    "client.alexscaves.HullbreakerRendererMixin",
+    "client.alexscaves.MineGuardianEntityMixin",
+    "client.alexscaves.TremorzillaRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

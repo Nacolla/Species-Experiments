@@ -29,13 +29,14 @@ repositories{
 			includeGroup "curse.maven"
 		}
 	}
+	mavenCentral()
 }
 apply plugin: 'eclipse'
 apply plugin: 'maven-publish'
 apply plugin: 'org.spongepowered.mixin'
 
 
-version = '3.5'
+version = '3.5.1'
 group = 'https://github.com/Peculiar-Room' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
 archivesBaseName = 'species'
 
@@ -51,8 +52,9 @@ minecraft {
 	// These can be tweaked, removed, or duplicated as needed.
 	runs {
 		client {
-			workingDirectory project.file('run')
+			properties 'mixin.env.remapRefMap': 'true'
 			property 'mixin.env.refMapRemappingFile', "${project.projectDir}/build/createSrgToMcp/output.srg"
+			workingDirectory project.file('run')
 			arg "-mixin.config="+"species.mixins.json"
 
 			// Recommended logging data for a userdev environment
@@ -108,6 +110,10 @@ dependencies {
 	minecraft "net.minecraftforge:forge:${mc_version}-47.3.1"
 	annotationProcessor 'org.spongepowered:mixin:0.8.7:processor'
 	runtimeOnly(fg.deobf("curse.maven:spark-361579:4587309"))
+
+	// MixinExtras is bundled with Forge 47.x at runtime; compileOnly so we can use @WrapWithCondition.
+	compileOnly 'io.github.llamalad7:mixinextras-common:0.3.5'
+	annotationProcessor 'io.github.llamalad7:mixinextras-common:0.3.5'
 
 	compileOnly(fg.deobf("mezz.jei:jei-${mc_version}-common-api:${jei_version}"))
 	compileOnly(fg.deobf("mezz.jei:jei-${mc_version}-forge-api:${jei_version}"))

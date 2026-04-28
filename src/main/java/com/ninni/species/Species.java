@@ -4,13 +4,17 @@ import com.mojang.logging.LogUtils;
 import com.ninni.species.client.ClientProxy;
 import com.ninni.species.registry.*;
 import com.ninni.species.registry.SpeciesParticles;
+import com.ninni.species.server.disguise.DisguiseBehaviors;
+import com.ninni.species.server.disguise.SpeciesIMCHandler;
 import com.ninni.species.server.events.ForgeEvents;
 import com.ninni.species.server.events.ModEvents;
 import com.ninni.species.server.world.poi.SpeciesPointOfInterestTypes;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -31,6 +35,8 @@ public class Species {
 		IEventBus eventBus = MinecraftForge.EVENT_BUS;
 		modEventBus.addListener(this::clientSetup);
 		modEventBus.addListener(this::commonSetup);
+		// IMC handler fires after FMLCommonSetupEvent — built-in registries populate first.
+		modEventBus.addListener(SpeciesIMCHandler::onIMC);
 
 		SpeciesBlocks.BLOCKS.register(modEventBus);
 		SpeciesBlockEntities.BLOCK_ENTITY_TYPES.register(modEventBus);
@@ -60,11 +66,26 @@ public class Species {
 		eventBus.register(new ModEvents());
 		eventBus.register(new ForgeEvents());
 		eventBus.register(this);
+
+		ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, SpeciesConfig.SERVER_SPEC);
 	}
 
 	private void commonSetup(final FMLCommonSetupEvent event) {
-		event.enqueueWork(() -> PROXY.commonSetup());
+		event.enqueueWork(() -> {
+			PROXY.commonSetup();
+			DisguiseBehaviors.registerDefaults();
+			com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.registerDefaults();
+			com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticRegistry.registerDefaults();
+			com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticsDemo.registerDemo();
+			// Data-driven layer (datapack JSON via DisguiseDataReloadListener); per-type entries win.
+			com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticRegistry.registerGlobal(
+					com.ninni.species.server.disguise.data.DataDrivenCosmetics.INSTANCE);
+		});
 	}
+
+	/** Reload listener for datapack-driven disguise overrides; one shared instance for client+server. */
+	public static final com.ninni.species.server.disguise.data.DisguiseDataReloadListener DISGUISE_DATA_LISTENER =
+			new com.ninni.species.server.disguise.data.DisguiseDataReloadListener();
 
 	public void clientSetup(final FMLClientSetupEvent event) {
 		event.enqueueWork(() -> PROXY.clientSetup());

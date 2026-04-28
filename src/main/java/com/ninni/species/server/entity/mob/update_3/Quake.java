@@ -279,7 +279,11 @@ public class Quake extends Monster {
 
 
     public DamageSource kinetic(LivingEntity livingEntity) {
-        return this.damageSources().source(SpeciesDamageTypes.KINETIC, livingEntity);
+        try {
+            return this.damageSources().source(SpeciesDamageTypes.KINETIC, livingEntity);
+        } catch (Throwable t) {
+            return this.damageSources().generic();
+        }
     }
 
     public float getWalkTargetValue(BlockPos p_33013_, LevelReader p_33014_) {

@@ -1,0 +1,45 @@
+{
+  "_comment_general": "Full example datapack file for the Species disguise system. ALL fields are optional. To activate, place a file at 'data/<namespace>/species_disguises/<entity_path>.json' (e.g. 'data/minecraft/species_disguises/cow.json' targets minecraft:cow). This example sits in 'disguise_data_examples/' so the reload listener skips it — copy/rename to use.",
+
+  "_comment_texture": "Cosmetic: re-skin the disguise model. ResourceLocation pointing to a PNG.",
+  "texture": "minecraft:textures/entity/cow/red_mooshroom.png",
+
+  "_comment_sounds": "Cosmetic: override hurt/death/ambient sounds. Hurt+death fire when the wearer takes damage / dies. Ambient plays roughly every 5 seconds while wearing the mask.",
+  "hurt_sound": "minecraft:entity.villager.hurt",
+  "death_sound": "minecraft:entity.villager.death",
+  "ambient_sound": "minecraft:entity.villager.ambient",
+
+  "_comment_name_tag": "Cosmetic: floating label above the disguise body.",
+  "name_tag": "Bessie the Mooshroom",
+
+  "_comment_world_scale": "Cosmetic: visual scale in the world (separate from inventory). 1.0 = unchanged, <1 shrinks, >1 grows.",
+  "world_scale": 1.2,
+
+  "_comment_glow_color": "Cosmetic: outline ARGB color when wearer has Glowing effect (Spectral Arrow / /effect give @s glowing). Hex string with optional '#'.",
+  "glow_color": "#00FFAA",
+
+  "_comment_inventory_scale": "Topology: inventory preview scale, multiplied on top of auto-fit. Use to fine-tune large/small models.",
+  "inventory_scale": 0.7,
+
+  "_comment_inventory_y_offset": "Topology: vertical translate (world units, pre-scale) applied during inventory render. Negative shifts model DOWN.",
+  "inventory_y_offset": -0.3,
+
+  "_comment_camera_size_min": "Topology: camera distance floor in blocks. Use for streaming-segment disguises (Gum Worm-class) where the union AABB starts small.",
+  "camera_size_min": 4.0,
+
+  "_comment_wearer_effects": "Cosmetic: status effects automatically applied while the mask is worn and removed on un-equip / swap. Each entry: 'id' required; 'amplifier' (default 0 = level I), 'duration' in ticks (default -1 = infinite), 'visible' particles (default true), 'show_icon' HUD icon (default true), 'ambient' (default false). Equivalent to /effect give @s <id> infinite <amplifier> <hide_particles>.",
+  "wearer_effects": [
+    {
+      "id": "minecraft:glowing",
+      "amplifier": 1,
+      "duration": -1,
+      "visible": false,
+      "show_icon": true,
+      "ambient": false
+    },
+    {
+      "id": "minecraft:speed",
+      "amplifier": 0
+    }
+  ]
+}

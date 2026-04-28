@@ -241,5 +241,6 @@ public class ModEvents {
         event.addListener(Species.PROXY.getLimpetOreManager());
         event.addListener(Species.PROXY.getGooberGooManager());
         event.addListener(Species.PROXY.getCruncherPelletManager());
+        event.addListener(Species.DISGUISE_DATA_LISTENER);
     }
 }

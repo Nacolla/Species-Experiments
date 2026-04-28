@@ -36,6 +36,7 @@ public class SpeciesNetwork {
         INSTANCE.registerMessage(getPacketID(), GooberGooSyncPacket.class, GooberGooSyncPacket::write, GooberGooSyncPacket::read, GooberGooSyncPacket::handle);
         INSTANCE.registerMessage(getPacketID(), CruncherPelletSyncPacket.class, CruncherPelletSyncPacket::write, CruncherPelletSyncPacket::read, CruncherPelletSyncPacket::handle);
         INSTANCE.registerMessage(getPacketID(), UpdateBirtdayCakeDataPacket.class, UpdateBirtdayCakeDataPacket::write, UpdateBirtdayCakeDataPacket::read, UpdateBirtdayCakeDataPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        INSTANCE.registerMessage(getPacketID(), MaskTriggerAnimPacket.class, MaskTriggerAnimPacket::write, MaskTriggerAnimPacket::read, MaskTriggerAnimPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     public static int getPacketID() {
