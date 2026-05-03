@@ -238,6 +238,9 @@ public class ForgeClientEvents {
                             com.ninni.species.server.disguise.util.BehaviorHooks.run(
                                     "disguise.subEntityRender:" + sub.getType(),
                                     () -> ((EntityRenderer) subRenderer).render(sub, sub.getYRot(), subPartialTick, subPoseStack, subBuffer, subLightFinal));
+                            // Per-segment shadow — sub-entities bypass the dispatcher, so its
+                            // shadow block never fires for them; mirror the draw here.
+                            renderSubEntityShadow(sub, subRenderer, subPoseStack, subBuffer, subPartialTick);
                             subPoseStack.popPose();
                         });
 
@@ -254,6 +257,28 @@ public class ForgeClientEvents {
 
         if (((LivingEntityAccess) entity).hasTanked()) event.getPoseStack().scale(1.35F, 1.125F, 1.35F);
         if (((LivingEntityAccess) entity).hasSnatched()) event.getPoseStack().scale(0.85F, 1.125F, 0.85F);
+    }
+
+    /** Draws a per-segment shadow for chain sub-entities that bypass the dispatcher. PoseStack
+     *  is already at segment-relative-to-camera from the model render — vanilla's
+     *  {@code renderShadow} expects exactly that. */
+    private static void renderSubEntityShadow(net.minecraft.world.entity.Entity sub,
+                                              EntityRenderer<?> subRenderer,
+                                              PoseStack poseStack, MultiBufferSource buffer,
+                                              float partialTick) {
+        if (sub.isInvisible()) return;
+        float radius = ((com.ninni.species.mixin.client.EntityRendererShadowAccessor) subRenderer)
+                .species$getShadowRadius();
+        if (radius <= 0.0F) return;
+        float strength = ((com.ninni.species.mixin.client.EntityRendererShadowAccessor) subRenderer)
+                .species$getShadowStrength();
+        net.minecraft.world.phys.Vec3 cam =
+                Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+        double distSq = cam.distanceToSqr(sub.getX(), sub.getY(), sub.getZ());
+        float weight = (float) ((1.0 - distSq / 256.0) * strength);
+        if (weight <= 0.0F) return;
+        com.ninni.species.mixin.client.EntityRenderDispatcherShadowAccessor.species$renderShadow(
+                poseStack, buffer, sub, weight, partialTick, sub.level(), Math.min(radius, 32.0F));
     }
 
     /** True for ceiling-anchored types (Winch, Vesper) needing bbHeight render compensation. */

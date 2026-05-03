@@ -22,6 +22,8 @@ public final class DisguiseTopologyRegistry {
     private static final Map<EntityType<?>, Double> CAMERA_SIZE_FACTORS = new HashMap<>();
     private static final Map<EntityType<?>, Float> INVENTORY_Y_OFFSETS = new HashMap<>();
     private static final Map<EntityType<?>, Float> WORLD_Y_OFFSETS = new HashMap<>();
+    private static final Map<EntityType<?>, Float> SHADOW_RADIUS_OVERRIDES = new HashMap<>();
+    private static final Map<EntityType<?>, Float> SHADOW_STRENGTH_OVERRIDES = new HashMap<>();
     private static final Map<EntityType<?>, java.util.List<DisguiseRenderLayer>> RENDER_LAYERS = new HashMap<>();
 
     private static final java.util.List<SubEntityProvider> GLOBAL_SUB_ENTITY_PROVIDERS = new java.util.ArrayList<>();
@@ -99,6 +101,28 @@ public final class DisguiseTopologyRegistry {
         WORLD_Y_OFFSETS.remove(type);
     }
 
+    /** Override the renderer's intrinsic shadow radius. {@code 0F} suppresses the shadow. */
+    public static void setShadowRadius(EntityType<?> type, float radius) {
+        if (type == null) return;
+        SHADOW_RADIUS_OVERRIDES.put(type, radius);
+    }
+
+    public static void clearShadowRadius(EntityType<?> type) {
+        if (type == null) return;
+        SHADOW_RADIUS_OVERRIDES.remove(type);
+    }
+
+    /** Override the shadow's distance-fade strength (vanilla default {@code 1.0F}). Rarely needed. */
+    public static void setShadowStrength(EntityType<?> type, float strength) {
+        if (type == null) return;
+        SHADOW_STRENGTH_OVERRIDES.put(type, strength);
+    }
+
+    public static void clearShadowStrength(EntityType<?> type) {
+        if (type == null) return;
+        SHADOW_STRENGTH_OVERRIDES.remove(type);
+    }
+
     /** Extra render-pass layer; multiple invocations stack in registration order. */
     public static void registerRenderLayer(EntityType<?> type, DisguiseRenderLayer layer) {
         if (type == null || layer == null) return;
@@ -156,6 +180,8 @@ public final class DisguiseTopologyRegistry {
                 || CAMERA_SIZE_OVERRIDES.containsKey(type)
                 || INVENTORY_Y_OFFSETS.containsKey(type)
                 || WORLD_Y_OFFSETS.containsKey(type)
+                || SHADOW_RADIUS_OVERRIDES.containsKey(type)
+                || SHADOW_STRENGTH_OVERRIDES.containsKey(type)
                 || RENDER_LAYERS.containsKey(type);
     }
 
@@ -170,6 +196,8 @@ public final class DisguiseTopologyRegistry {
         all.addAll(CAMERA_SIZE_OVERRIDES.keySet());
         all.addAll(INVENTORY_Y_OFFSETS.keySet());
         all.addAll(WORLD_Y_OFFSETS.keySet());
+        all.addAll(SHADOW_RADIUS_OVERRIDES.keySet());
+        all.addAll(SHADOW_STRENGTH_OVERRIDES.keySet());
         all.addAll(RENDER_LAYERS.keySet());
         return java.util.Collections.unmodifiableSet(all);
     }
@@ -202,6 +230,20 @@ public final class DisguiseTopologyRegistry {
         if (disguise == null) return 0.0F;
         Float v = WORLD_Y_OFFSETS.get(disguise.getType());
         return v != null ? v : 0.0F;
+    }
+
+    /** Per-type shadow-radius override; {@code null} means fall back to the disguise renderer's intrinsic. */
+    @javax.annotation.Nullable
+    public static Float getShadowRadiusOverride(LivingEntity disguise) {
+        if (disguise == null) return null;
+        return SHADOW_RADIUS_OVERRIDES.get(disguise.getType());
+    }
+
+    /** Per-type shadow-strength override; {@code null} means fall back to the disguise renderer's intrinsic. */
+    @javax.annotation.Nullable
+    public static Float getShadowStrengthOverride(LivingEntity disguise) {
+        if (disguise == null) return null;
+        return SHADOW_STRENGTH_OVERRIDES.get(disguise.getType());
     }
 
     // --------------------------------------------------------------------

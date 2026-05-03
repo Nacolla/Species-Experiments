@@ -60,6 +60,11 @@ public final class SpeciesIMCHandler {
                     Dispatcher.of(InventoryYOffsetEntry.class, e -> SpeciesAPI.setInventoryYOffset(e.type(), e.yOffset()))),
             Map.entry(SpeciesIMCKeys.SET_WORLD_Y_OFFSET,
                     Dispatcher.of(WorldYOffsetEntry.class, e -> SpeciesAPI.setWorldYOffset(e.type(), e.yOffset()))),
+            Map.entry(SpeciesIMCKeys.SET_SHADOW_OVERRIDE,
+                    Dispatcher.of(ShadowOverrideEntry.class, e -> {
+                        if (!Float.isNaN(e.radius())) SpeciesAPI.setShadowRadius(e.type(), e.radius());
+                        if (!Float.isNaN(e.strength())) SpeciesAPI.setShadowStrength(e.type(), e.strength());
+                    })),
             Map.entry(SpeciesIMCKeys.REGISTER_RENDER_LAYER,
                     Dispatcher.of(RenderLayerRegistration.class, r -> SpeciesAPI.registerRenderLayer(r.type(), r.layer())))
     );

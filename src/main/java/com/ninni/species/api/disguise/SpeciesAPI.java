@@ -100,6 +100,17 @@ public final class SpeciesAPI {
         com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.setWorldYOffset(type, yOffset);
     }
 
+    /** Override the disguise's shadow radius (default copies the renderer's intrinsic).
+     *  Use {@code 0F} to suppress, or a tuned value when the intrinsic doesn't fit. */
+    public static void setShadowRadius(EntityType<?> type, float radius) {
+        com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.setShadowRadius(type, radius);
+    }
+
+    /** Override the disguise's shadow distance-fade strength (vanilla default {@code 1.0F}). */
+    public static void setShadowStrength(EntityType<?> type, float strength) {
+        com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.setShadowStrength(type, strength);
+    }
+
     /** Add an extra render-pass layer for the given type. Multiple layers run in registration order. */
     public static void registerRenderLayer(EntityType<?> type, DisguiseRenderLayer layer) {
         com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.registerRenderLayer(type, layer);

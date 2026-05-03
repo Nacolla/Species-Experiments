@@ -42,6 +42,9 @@ public final class SpeciesIMCKeys {
     /** Set in-world Y-offset (world units). Payload: {@link WorldYOffsetEntry}. */
     public static final String SET_WORLD_Y_OFFSET = "set_world_y_offset";
 
+    /** Override shadow radius and/or strength on the disguise. Payload: {@link ShadowOverrideEntry}. */
+    public static final String SET_SHADOW_OVERRIDE = "set_shadow_override";
+
     /** Register a render-layer for a specific type. Payload: {@link RenderLayerRegistration}. */
     public static final String REGISTER_RENDER_LAYER = "register_render_layer";
 
