@@ -12,10 +12,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Hooks {@code LivingEntityRenderer.getRenderType} at RETURN to swap in {@link DisguiseCosmetics#overrideTexture}
- * while {@link DisguiseCosmeticContext#current()} is non-null; subclass overrides of {@code getRenderType} bypass this.
- */
+/** Swaps in {@link DisguiseCosmetics#overrideTexture} at render time. */
 @Mixin(LivingEntityRenderer.class)
 public abstract class LivingEntityRendererCosmeticMixin {
 
@@ -27,18 +24,16 @@ public abstract class LivingEntityRendererCosmeticMixin {
             boolean glowing,
             CallbackInfoReturnable<RenderType> cir) {
         LivingEntity wearer = DisguiseCosmeticContext.current();
-        if (wearer == null) return; // Not inside a disguise render — fall through.
+        if (wearer == null) return;
 
         DisguiseCosmetics cosmetics = DisguiseCosmeticRegistry.get(entity);
         ResourceLocation override = cosmetics.overrideTexture(wearer, entity);
         if (override == null) return;
 
         RenderType original = cir.getReturnValue();
-        if (original == null) return; // Parent returned null (entity wasn't rendered) — don't synthesize a RenderType.
+        if (original == null) return;
 
-        // Rebuild the RenderType with the override texture, mirroring
-        // LivingEntityRenderer.getRenderType branch logic to preserve
-        // translucency, body-visibility, and outline variants.
+        // Mirror LivingEntityRenderer.getRenderType branches with the override texture.
         if (translucent) {
             cir.setReturnValue(RenderType.itemEntityTranslucentCull(override));
         } else if (bodyVisible) {

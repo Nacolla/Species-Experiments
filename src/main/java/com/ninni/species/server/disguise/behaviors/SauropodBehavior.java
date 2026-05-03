@@ -2,16 +2,13 @@ package com.ninni.species.server.disguise.behaviors;
 
 import com.ninni.species.api.disguise.DisguiseBehavior;
 import com.ninni.species.server.disguise.ModelStraightenBridge;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.world.entity.LivingEntity;
 
-import java.lang.reflect.Field;
-
-/**
- * Behavior for AlexsCaves sauropods (Atlatitan, Luxtructosaurus, anything extending {@code SauropodBaseEntity}).
- * Drives {@code WALKING} from wearer movement, scales walk-anim phase, and forces {@code straighten=true}
- * via {@link ModelStraightenBridge#setStraightenViaReflection} for inventory render. Soft-dep; all reflection.
- */
+/** AC sauropod disguise (anything extending {@code SauropodBaseEntity}). Drives {@code WALKING}
+ *  from wearer movement, scales the walk-anim phase, and forces {@code straighten=true} for
+ *  inventory render. Soft-dep, reflective. */
 public class SauropodBehavior implements DisguiseBehavior {
 
     public static final SauropodBehavior INSTANCE = new SauropodBehavior();
@@ -71,21 +68,7 @@ public class SauropodBehavior implements DisguiseBehavior {
         if (reflectionInited) return;
         synchronized (SauropodBehavior.class) {
             if (reflectionInited) return;
-            // Walk the hierarchy to find the SauropodBaseEntity that declares WALKING.
-            Class<?> c = sauropodClass;
-            while (c != null && c != Object.class) {
-                try {
-                    Field f = c.getDeclaredField("WALKING");
-                    f.setAccessible(true);
-                    Object value = f.get(null);
-                    if (value instanceof EntityDataAccessor<?>) {
-                        walkingAccessor = (EntityDataAccessor<Boolean>) value;
-                        break;
-                    }
-                } catch (NoSuchFieldException | IllegalAccessException ignored) {}
-                c = c.getSuperclass();
-            }
-            // Set inited LAST — partial resolution failure must not lock out future retries.
+            walkingAccessor = ReflectionHelper.accessor(sauropodClass, "WALKING");
             reflectionInited = true;
         }
     }

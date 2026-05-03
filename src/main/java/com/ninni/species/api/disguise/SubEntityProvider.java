@@ -12,11 +12,8 @@ import java.util.Collections;
 @FunctionalInterface
 public interface SubEntityProvider {
 
-    /**
-     * Returns sub-entities in render order. Each entity's world position must be set;
-     * callers compute offsets relative to the wearer. Returning empty is valid when
-     * segments are absent or the relevant mod is not loaded.
-     */
+    /** Sub-entities in render order with world positions set. Empty is valid (segments absent
+     *  or mod not loaded). */
     Iterable<? extends Entity> getSubEntities(LivingEntity wearer, LivingEntity disguise);
 
     /** A no-op provider that always returns an empty iterable. */

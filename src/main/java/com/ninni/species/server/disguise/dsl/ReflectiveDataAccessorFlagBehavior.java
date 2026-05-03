@@ -57,7 +57,6 @@ public final class ReflectiveDataAccessorFlagBehavior implements DisguiseBehavio
             } catch (NoSuchFieldException | IllegalAccessException ignored) {}
             c = c.getSuperclass();
         }
-        // Set inited LAST so a partial resolution failure doesn't lock out future retries.
         reflectionInited = true;
     }
 }

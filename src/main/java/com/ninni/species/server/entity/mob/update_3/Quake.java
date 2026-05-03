@@ -110,9 +110,10 @@ public class Quake extends Monster {
     }
 
     private void damage(float amount) {
-        List<LivingEntity> list = level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(11D), NO_CREATIVE_OR_SPECTATOR);
-        List<ServerPlayer> advancementList = level().getEntitiesOfClass(ServerPlayer.class, this.getBoundingBox().inflate(25D), player -> true);
-        Set<Mob> killedMobs = new HashSet<>();
+        // Disguise wearers keep visual feedback (particle + screen shake) but skip the AOE
+        // push/damage/advancement triggers so the gesture doesn't affect the world.
+        boolean isDisguise = this.getTags().contains(
+                com.ninni.species.client.events.WickedMaskDisguiseEvents.DISGUISE_TAG);
 
         //Particle
         if (this.level() instanceof ServerLevel serverLevel) {
@@ -120,53 +121,57 @@ public class Quake extends Monster {
         }
         this.addDeltaMovement(new Vec3(0,0.35,0));
 
-        for (LivingEntity target : list) {
-            if (target != this) {
-                //Handle knockback
-                Vec3 enemyPos = target.position().subtract(this.position());
-                Vec3 normalizedDirection = enemyPos.normalize();
+        if (!isDisguise) {
+            List<LivingEntity> list = level().getEntitiesOfClass(LivingEntity.class, this.getBoundingBox().inflate(11D), NO_CREATIVE_OR_SPECTATOR);
+            List<ServerPlayer> advancementList = level().getEntitiesOfClass(ServerPlayer.class, this.getBoundingBox().inflate(25D), player -> true);
+            Set<Mob> killedMobs = new HashSet<>();
 
-                double knockbackXZ = 2.5 * (1 - target.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE));
-                double knockbackY = 0.5 * (1 - target.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE));
+            for (LivingEntity target : list) {
+                if (target != this) {
+                    //Handle knockback
+                    Vec3 enemyPos = target.position().subtract(this.position());
+                    Vec3 normalizedDirection = enemyPos.normalize();
 
-                target.push(normalizedDirection.x() * knockbackXZ, normalizedDirection.y() * knockbackY, normalizedDirection.z() * knockbackXZ);
+                    double knockbackXZ = 2.5 * (1 - target.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE));
+                    double knockbackY = 0.5 * (1 - target.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE));
 
-                //Scale damage
-                double distanceFromEnemy = target.position().distanceTo(this.position());
-                float scalingFactor;
+                    target.push(normalizedDirection.x() * knockbackXZ, normalizedDirection.y() * knockbackY, normalizedDirection.z() * knockbackXZ);
 
-                if (distanceFromEnemy <= 4) scalingFactor = 1F;
-                else if (distanceFromEnemy <= 7) scalingFactor = 0.75F;
-                else if (distanceFromEnemy <= 10) scalingFactor = 0.5F;
-                else scalingFactor = 0.25F;
+                    //Scale damage
+                    double distanceFromEnemy = target.position().distanceTo(this.position());
+                    float scalingFactor;
 
-                amount *= scalingFactor;
+                    if (distanceFromEnemy <= 4) scalingFactor = 1F;
+                    else if (distanceFromEnemy <= 7) scalingFactor = 0.75F;
+                    else if (distanceFromEnemy <= 10) scalingFactor = 0.5F;
+                    else scalingFactor = 0.25F;
 
-                //Damage
-                if (target.getUUID().equals(UUID.fromString("3e11a940-8aff-449c-80d1-fc0f427f4876")) || target.getUUID().equals(UUID.fromString("053de6af-392b-4385-90c5-34395b7e8757"))) {
-                    target.hurt(this.damageSources().source(DamageTypes.BAD_RESPAWN_POINT, this), 999999999);
-                } else {
-                   if (target instanceof Creeper creeper && creeper.isPowered() && amount > creeper.getHealth()) creeper.spawnAtLocation(SpeciesItems.MUSIC_DISK_SPAWNER.get());
-                   target.hurt(this.kinetic(this), amount);
+                    amount *= scalingFactor;
+
+                    //Damage
+                    if (target.getUUID().equals(UUID.fromString("3e11a940-8aff-449c-80d1-fc0f427f4876")) || target.getUUID().equals(UUID.fromString("053de6af-392b-4385-90c5-34395b7e8757"))) {
+                        target.hurt(this.damageSources().source(DamageTypes.BAD_RESPAWN_POINT, this), 999999999);
+                    } else {
+                       if (target instanceof Creeper creeper && creeper.isPowered() && amount > creeper.getHealth()) creeper.spawnAtLocation(SpeciesItems.MUSIC_DISK_SPAWNER.get());
+                       target.hurt(this.kinetic(this), amount);
+                    }
+
+                    this.doHurtTarget(target);
+
+                    if (!target.isAlive() && target instanceof Mob mob) killedMobs.add(mob);
                 }
-
-                this.doHurtTarget(target);
-
-                if (!target.isAlive() && target instanceof Mob mob) killedMobs.add(mob);
             }
-        }
 
 
-        if (!advancementList.isEmpty()) {
-            for (ServerPlayer serverPlayer : advancementList) {
-                if (killedMobs.size() >= 10) SpeciesCriterion.KILL_TEN_MOBS_WITH_QUAKE.trigger(serverPlayer);
+            if (!advancementList.isEmpty()) {
+                for (ServerPlayer serverPlayer : advancementList) {
+                    if (killedMobs.size() >= 10) SpeciesCriterion.KILL_TEN_MOBS_WITH_QUAKE.trigger(serverPlayer);
 
-                HashSet<EntityType<?>> killedMobTypes = killedMobs.stream().map(Mob::getType).collect(Collectors.toCollection(HashSet::new));
-                Set<EntityType<?>> requiredMobTypes = BuiltInRegistries.ENTITY_TYPE.stream().filter(type -> type.is(SpeciesTags.PREHISTORIC)).collect(Collectors.toSet());
+                    HashSet<EntityType<?>> killedMobTypes = killedMobs.stream().map(Mob::getType).collect(Collectors.toCollection(HashSet::new));
+                    Set<EntityType<?>> requiredMobTypes = BuiltInRegistries.ENTITY_TYPE.stream().filter(type -> type.is(SpeciesTags.PREHISTORIC)).collect(Collectors.toSet());
 
-                System.out.println(requiredMobTypes);
-
-                if (killedMobTypes.containsAll(requiredMobTypes)) SpeciesCriterion.KILL_ALL_PREHISTORIC_MOBS_WITH_QUAKE.trigger(serverPlayer);
+                    if (killedMobTypes.containsAll(requiredMobTypes)) SpeciesCriterion.KILL_ALL_PREHISTORIC_MOBS_WITH_QUAKE.trigger(serverPlayer);
+                }
             }
         }
 

@@ -9,10 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.function.Predicate;
 
-/**
- * Stateless wearer-state {@link Predicate}s shared across {@link ReflectiveBooleanFlagBehavior.FlagSync}
- * entries. Inline as lambdas for one-off use; promote here once shared by three+ behaviors.
- */
+/** Stateless wearer-state {@link Predicate}s shared across behaviors. */
 public final class WearerPredicates {
 
     private WearerPredicates() {}
@@ -44,12 +41,7 @@ public final class WearerPredicates {
     /** Constantly true. Symmetric counterpart to {@link #ALWAYS_FALSE}. */
     public static final Predicate<LivingEntity> ALWAYS_TRUE = wearer -> true;
 
-    /**
-     * Flying with a sturdy-bottom block directly above the wearer's head. Engages the
-     * ceiling-cling pose only when there is something to hang from; without the ceiling
-     * check, pausing mid-flight would flip the model upside-down incoherently.
-     * Probes one block above {@code bbHeight} and one block above that (small head-clearance gap).
-     */
+    /** Flying with a sturdy-bottom block above the wearer's head; gates the ceiling-cling pose. */
     public static final Predicate<LivingEntity> CEILING_HANGING = wearer -> {
         if (!FLYING.test(wearer)) return false;
         Level level = wearer.level();
@@ -63,11 +55,7 @@ public final class WearerPredicates {
         return bsAbove.isFaceSturdy(level, above, Direction.DOWN);
     };
 
-    /**
-     * Flying with no solid ceiling above — complement of {@link #CEILING_HANGING} within
-     * {@link #FLYING}. Use for wing-flap animations on mobs that also have a hanging pose
-     * so the two are mutually exclusive and never blend.
-     */
+    /** Flying with no ceiling above; complement of {@link #CEILING_HANGING} within {@link #FLYING}. */
     public static final Predicate<LivingEntity> FLYING_NOT_HANGING = wearer ->
             FLYING.test(wearer) && !CEILING_HANGING.test(wearer);
 }

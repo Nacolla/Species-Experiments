@@ -2,17 +2,15 @@ package com.ninni.species.server.disguise.behaviors;
 
 import com.ninni.species.client.events.InventoryRenderCheck;
 import com.ninni.species.api.disguise.DisguiseBehavior;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * Behavior for Ice and Fire's dragon family. {@link #preTick} drives IaF's {@code setFlying}/{@code setHovering}
- * from wearer state; {@link #postTick} clears pitch/roll buffers when grounded (IaF gates both calc and decay on !onGround).
- * Soft-dep, reflective with first-call caching.
- */
+/** IaF dragon disguise: syncs flying/hovering flags, zeroes pitch/roll buffers when grounded,
+ *  locks rotation in inventory render. Soft-dep, reflective with first-call caching. */
 public final class IafDragonBehavior implements DisguiseBehavior {
 
     public static final IafDragonBehavior INSTANCE = new IafDragonBehavior();
@@ -35,20 +33,14 @@ public final class IafDragonBehavior implements DisguiseBehavior {
     private static Field yawTimerField;
     private static Field pitchTimerField;
 
-    /**
-     * Per-render snapshot in a ThreadLocal so each preRender/postRender pair has its own
-     * state. A render exception between snapshot and restore leaves no global residue;
-     * postRender always calls {@link ThreadLocal#remove}.
-     */
+    /** Per-render snapshot; {@code postRender} always calls {@link ThreadLocal#remove}. */
     private static final ThreadLocal<Snapshot> SNAPSHOT = new ThreadLocal<>();
 
     private static final class Snapshot {
         boolean savedDragonPitchValid;
         float savedDragonPitch;
         float savedPrevDragonPitch;
-        // Full rotation snapshot — all fields pinned to yBodyRot/0 so netHeadYaw=0,
-        // headPitch=0 → model.faceTarget(0,0,...) adds no bend to neckParts
-        // (DragonTabulaModelAnimator.java:92).
+        // Rotation fields pinned to yBodyRot/0 so faceTarget adds no neck bend in inventory.
         float savedYHeadRot;
         float savedYHeadRotO;
         float savedYBodyRotO;
@@ -56,7 +48,6 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         float savedYRotO;
         float savedXRot;
         float savedXRotO;
-        // Saved chain buffer variations (5 buffers × 4 floats + 2 timers each)
         float[] savedBufferYaw;
         float[] savedBufferPrevYaw;
         float[] savedBufferPitch;
@@ -79,7 +70,6 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         try {
             setFlyingMethod.invoke(disguise, wearerFlying);
             if (setHoveringMethod != null) {
-                // Hover when player is creative-flying but not moving fast — approximation.
                 boolean wearerHovering = (wearer instanceof Player p && p.getAbilities().flying)
                         && wearer.getDeltaMovement().horizontalDistanceSqr() < 0.005;
                 setHoveringMethod.invoke(disguise, wearerHovering);
@@ -96,8 +86,7 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         Snapshot snap = new Snapshot();
         SNAPSHOT.set(snap);
 
-        // (1) Chain buffer snapshot + zero. Runs unconditionally, independent of
-        // dragonPitch reflection.
+        // (1) Chain buffer snapshot + zero. turn/tail buffers aren't IFChainBuffer; skip via instance check.
         Field[] bufferFields = {turnBufferField, tailBufferField, rollBufferField, pitchBufferField, pitchBufferBodyField};
         snap.savedBufferYaw = new float[bufferFields.length];
         snap.savedBufferPrevYaw = new float[bufferFields.length];
@@ -110,21 +99,19 @@ public final class IafDragonBehavior implements DisguiseBehavior {
                 if (bufferFields[i] == null) continue;
                 Object buf = bufferFields[i].get(disguise);
                 if (buf == null) continue;
-                if (yawVariationField != null) snap.savedBufferYaw[i] = yawVariationField.getFloat(buf);
+                if (yawVariationField == null || !yawVariationField.getDeclaringClass().isInstance(buf)) continue;
+                snap.savedBufferYaw[i] = yawVariationField.getFloat(buf);
                 if (prevYawVariationField != null) snap.savedBufferPrevYaw[i] = prevYawVariationField.getFloat(buf);
                 if (pitchVariationField != null) snap.savedBufferPitch[i] = pitchVariationField.getFloat(buf);
                 if (prevPitchVariationField != null) snap.savedBufferPrevPitch[i] = prevPitchVariationField.getFloat(buf);
                 if (yawTimerField != null) snap.savedBufferYawTimer[i] = yawTimerField.getInt(buf);
                 if (pitchTimerField != null) snap.savedBufferPitchTimer[i] = pitchTimerField.getInt(buf);
                 zeroBuffer(disguise, bufferFields[i]);
-            } catch (ReflectiveOperationException ignored) {}
+            } catch (ReflectiveOperationException | IllegalArgumentException ignored) {}
         }
 
-        // (2) Full rotation lock — pin every yaw/pitch field to yBodyRot/0.
-        // Vanilla InventoryScreen sets yBodyRot≠yHeadRot by design and leaves
-        // *RotO at world values, so lerp can land 90-180° off target; IaF's neck
-        // chain amplifies this into a visible twist. Locking everything kills
-        // both effects (DragonTabulaModelAnimator.java:92).
+        // (2) Full rotation lock — vanilla InventoryScreen leaves stale *RotO that the
+        // neck chain amplifies into a visible twist; pinning yBody/0 kills it.
         snap.savedYHeadRot = disguise.yHeadRot;
         snap.savedYHeadRotO = disguise.yHeadRotO;
         snap.savedYBodyRotO = disguise.yBodyRotO;
@@ -142,9 +129,8 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         disguise.setXRot(0F);
         disguise.xRotO = 0F;
 
-        // (3) dragonPitch override. RenderDragonBase.scale (line 50-51) applies
-        // mulPose(Axis.XP.rotationDegrees(dragonPitch)) before setupAnim — stale world
-        // value causes a visible global tilt in inventory. Force to 0.
+        // (3) Force dragonPitch=0 — the renderer applies it before setupAnim and stale world
+        // values tilt the inventory preview.
         if (setDragonPitchMethod != null && prevDragonPitchField != null) {
             try {
                 snap.savedDragonPitch = (Float) getDragonPitchMethod.invoke(disguise);
@@ -163,7 +149,6 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         if (!inInventory) return;
         Snapshot snap = SNAPSHOT.get();
         if (snap == null) return;
-        // Always remove ThreadLocal — defensive cleanup regardless of downstream throws.
         SNAPSHOT.remove();
 
         // Restore chain buffer state.
@@ -174,13 +159,14 @@ public final class IafDragonBehavior implements DisguiseBehavior {
                     if (bufferFields[i] == null) continue;
                     Object buf = bufferFields[i].get(disguise);
                     if (buf == null) continue;
-                    if (yawVariationField != null) yawVariationField.setFloat(buf, snap.savedBufferYaw[i]);
+                    if (yawVariationField == null || !yawVariationField.getDeclaringClass().isInstance(buf)) continue;
+                    yawVariationField.setFloat(buf, snap.savedBufferYaw[i]);
                     if (prevYawVariationField != null) prevYawVariationField.setFloat(buf, snap.savedBufferPrevYaw[i]);
                     if (pitchVariationField != null) pitchVariationField.setFloat(buf, snap.savedBufferPitch[i]);
                     if (prevPitchVariationField != null) prevPitchVariationField.setFloat(buf, snap.savedBufferPrevPitch[i]);
                     if (yawTimerField != null) yawTimerField.setInt(buf, snap.savedBufferYawTimer[i]);
                     if (pitchTimerField != null) pitchTimerField.setInt(buf, snap.savedBufferPitchTimer[i]);
-                } catch (ReflectiveOperationException ignored) {}
+                } catch (ReflectiveOperationException | IllegalArgumentException ignored) {}
             }
         }
 
@@ -203,9 +189,7 @@ public final class IafDragonBehavior implements DisguiseBehavior {
     public void postTick(LivingEntity wearer, LivingEntity disguise) {
         if (yawVariationField == null) return;
 
-        // IFChainBuffer decay bug (IFChainBuffer.java:53-55): when |yawVariation| <
-        // angleDecrement, sets variation = angleDecrement instead of 0, leaving a
-        // permanent residual swing. Hand-clean small variations to enforce settle-at-zero.
+        // IFChainBuffer decay bug: |variation| < angleDecrement settles at angleDecrement, not 0.
         try {
             zeroSmallVariation(disguise, turnBufferField);
             zeroSmallVariation(disguise, tailBufferField);
@@ -214,9 +198,7 @@ public final class IafDragonBehavior implements DisguiseBehavior {
             zeroSmallVariation(disguise, pitchBufferBodyField);
         } catch (ReflectiveOperationException ignored) {}
 
-        // calculate*Buffer is gated by !onGround() in IafDragonLogic.updateDragonClient,
-        // so neither calculate nor decay runs while grounded — airborne state freezes.
-        // Zero explicitly for a clean inventory preview.
+        // Native calculate/decay is gated on !onGround(); zero explicitly for clean inventory preview.
         if (disguise.onGround() && rollBufferField != null) {
             try {
                 zeroBuffer(disguise, rollBufferField);
@@ -226,13 +208,13 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         }
     }
 
-    /** Zeros buffer variations below the IaF decay threshold (catches the settle-at-decrement bug). */
+    /** Zeros sub-decay-threshold variations to defeat the IFChainBuffer settle-at-decrement bug. */
     private static void zeroSmallVariation(LivingEntity disguise, Field bufferField) throws ReflectiveOperationException {
         if (bufferField == null) return;
         Object buffer = bufferField.get(disguise);
         if (buffer == null) return;
-        // Threshold > IaF angleDecrement (5 for swing, 1 for wave/flap) to catch the
-        // buggy residual without killing an actively swinging buffer.
+        if (yawVariationField == null || !yawVariationField.getDeclaringClass().isInstance(buffer)) return;
+        // Above IaF's max angleDecrement (5) so an active swing isn't snapped to 0.
         final float threshold = 6.0F;
         if (yawVariationField != null) {
             float v = yawVariationField.getFloat(buffer);
@@ -255,7 +237,8 @@ public final class IafDragonBehavior implements DisguiseBehavior {
     private static void zeroBuffer(LivingEntity disguise, Field bufferField) throws ReflectiveOperationException {
         Object buffer = bufferField.get(disguise);
         if (buffer == null) return;
-        if (yawVariationField != null) yawVariationField.setFloat(buffer, 0.0F);
+        if (yawVariationField == null || !yawVariationField.getDeclaringClass().isInstance(buffer)) return;
+        yawVariationField.setFloat(buffer, 0.0F);
         if (prevYawVariationField != null) prevYawVariationField.setFloat(buffer, 0.0F);
         if (pitchVariationField != null) pitchVariationField.setFloat(buffer, 0.0F);
         if (prevPitchVariationField != null) prevPitchVariationField.setFloat(buffer, 0.0F);
@@ -267,34 +250,25 @@ public final class IafDragonBehavior implements DisguiseBehavior {
         if (reflectionInited) return;
         synchronized (IafDragonBehavior.class) {
             if (reflectionInited) return;
-            // Set reflectionInited LAST: a transient resolution failure on a partial
-            // subclass must not permanently disable retry for a correctly-typed disguise.
-            try {
-                setFlyingMethod = dragonClass.getMethod("setFlying", boolean.class);
-            } catch (ReflectiveOperationException ignored) {}
-            try {
-                setHoveringMethod = dragonClass.getMethod("setHovering", boolean.class);
-            } catch (ReflectiveOperationException ignored) {}
-            try {
-                getDragonPitchMethod = dragonClass.getMethod("getDragonPitch");
-                setDragonPitchMethod = dragonClass.getMethod("setDragonPitch", float.class);
-            } catch (ReflectiveOperationException ignored) {}
-            prevDragonPitchField = grabField(dragonClass, "prevDragonPitch");
-            turnBufferField = grabField(dragonClass, "turn_buffer");
-            tailBufferField = grabField(dragonClass, "tail_buffer");
-            rollBufferField = grabField(dragonClass, "roll_buffer");
-            pitchBufferField = grabField(dragonClass, "pitch_buffer");
-            pitchBufferBodyField = grabField(dragonClass, "pitch_buffer_body");
+            setFlyingMethod = ReflectionHelper.publicMethod(dragonClass, "setFlying", boolean.class);
+            setHoveringMethod = ReflectionHelper.publicMethod(dragonClass, "setHovering", boolean.class);
+            getDragonPitchMethod = ReflectionHelper.publicMethod(dragonClass, "getDragonPitch");
+            setDragonPitchMethod = ReflectionHelper.publicMethod(dragonClass, "setDragonPitch", float.class);
+            prevDragonPitchField = ReflectionHelper.declaredField(dragonClass, "prevDragonPitch");
+            turnBufferField = ReflectionHelper.declaredField(dragonClass, "turn_buffer");
+            tailBufferField = ReflectionHelper.declaredField(dragonClass, "tail_buffer");
+            rollBufferField = ReflectionHelper.declaredField(dragonClass, "roll_buffer");
+            pitchBufferField = ReflectionHelper.declaredField(dragonClass, "pitch_buffer");
+            pitchBufferBodyField = ReflectionHelper.declaredField(dragonClass, "pitch_buffer_body");
 
-            // Probe both Citadel ChainBuffer and IaF IFChainBuffer — same field names on both.
             Class<?> bufferClass = findBufferClass(dragonClass.getClassLoader());
             if (bufferClass != null) {
-                yawVariationField = grabField(bufferClass, "yawVariation");
-                prevYawVariationField = grabField(bufferClass, "prevYawVariation");
-                pitchVariationField = grabField(bufferClass, "pitchVariation");
-                prevPitchVariationField = grabField(bufferClass, "prevPitchVariation");
-                yawTimerField = grabField(bufferClass, "yawTimer");
-                pitchTimerField = grabField(bufferClass, "pitchTimer");
+                yawVariationField = ReflectionHelper.declaredField(bufferClass, "yawVariation");
+                prevYawVariationField = ReflectionHelper.declaredField(bufferClass, "prevYawVariation");
+                pitchVariationField = ReflectionHelper.declaredField(bufferClass, "pitchVariation");
+                prevPitchVariationField = ReflectionHelper.declaredField(bufferClass, "prevPitchVariation");
+                yawTimerField = ReflectionHelper.declaredField(bufferClass, "yawTimer");
+                pitchTimerField = ReflectionHelper.declaredField(bufferClass, "pitchTimer");
             }
             reflectionInited = true;
         }
@@ -310,16 +284,6 @@ public final class IafDragonBehavior implements DisguiseBehavior {
             } catch (ClassNotFoundException ignored) {}
         }
         return null;
-    }
-
-    private static Field grabField(Class<?> clazz, String name) {
-        try {
-            Field f = clazz.getDeclaredField(name);
-            f.setAccessible(true);
-            return f;
-        } catch (NoSuchFieldException e) {
-            return null;
-        }
     }
 
     private static boolean isInventoryRender() {

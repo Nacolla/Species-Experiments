@@ -20,11 +20,7 @@ public final class DisguiseLogging {
 
     private DisguiseLogging() {}
 
-    /**
-     * Log a swallowed exception at the named site, rate-limited.
-     * @param siteKey throwing site identifier; same key shares a counter
-     * @param t the exception
-     */
+    /** Log a swallowed exception, rate-limited per {@code siteKey}. */
     public static void rateLimited(String siteKey, Throwable t) {
         int count = COUNTERS.merge(siteKey, 1, Integer::sum);
         if (count == 1) {

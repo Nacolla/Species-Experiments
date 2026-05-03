@@ -2,6 +2,7 @@ package com.ninni.species.server.disguise.behaviors;
 
 import com.ninni.species.client.events.InventoryRenderCheck;
 import com.ninni.species.api.disguise.DisguiseBehavior;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -10,11 +11,9 @@ import net.minecraftforge.entity.PartEntity;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * Behavior for Whaleborne's Hullback (multipart, positioned via private {@code updatePartPositions}).
- * Allows xRot only in inventory; pre-conditions part arrays to a rigid layout and re-runs
- * updatePartPositions wrapped in a full snapshot/restore so world-render isn't polluted. Soft-dep, reflective.
- */
+/** Hullback (Whaleborne) disguise. xRot only in inventory; pre-conditions parts to a rigid
+ *  layout and re-runs {@code updatePartPositions} inside a full snapshot/restore so the
+ *  world tick state isn't polluted. Soft-dep, reflective. */
 public final class HullbackBehavior implements DisguiseBehavior {
 
     public static final HullbackBehavior INSTANCE = new HullbackBehavior();
@@ -30,25 +29,27 @@ public final class HullbackBehavior implements DisguiseBehavior {
     private static Field oldPartXRotField;
     private static Field stationaryTicksField;
 
-    // Snapshot storage (render thread only). Each pre/postRender call is paired.
-    private Vec3[] savedPartPosition;
-    private float[] savedPartYRot;
-    private float[] savedPartXRot;
-    private Vec3[] savedPrevPartPositions;
-    private Vec3[] savedOldPartPosition;
-    private float[] savedOldPartYRot;
-    private float[] savedOldPartXRot;
-    // Sub-entity state. updatePartPositions() calls moveTo() on each part; without
-    // restoring those, setOldPosAndRots() bakes the inventory mouse pose into
-    // oldPartPosition[] — visible as a one-frame jitter and lerp drift.
-    private Vec3[] savedSubEntityPos;
-    private float[] savedSubEntityYRot;
-    private float[] savedSubEntityXRot;
-    private float[] savedSubEntityYRotO;
-    private float[] savedSubEntityXRotO;
-    // Snapshot stationaryTicks to neutralize swim oscillation in inventory.
-    private int savedStationaryTicks;
-    private boolean savedInventoryNeutralized;
+    /** Per-render-thread snapshot — INSTANCE is a singleton, so concurrent renders (multiple
+     *  GUI viewports of different wearers in the same frame) would otherwise trample each other. */
+    private static final class Snapshot {
+        Vec3[] partPosition;
+        float[] partYRot;
+        float[] partXRot;
+        Vec3[] prevPartPositions;
+        Vec3[] oldPartPosition;
+        float[] oldPartYRot;
+        float[] oldPartXRot;
+        Vec3[] subEntityPos;
+        float[] subEntityYRot;
+        float[] subEntityXRot;
+        float[] subEntityYRotO;
+        float[] subEntityXRotO;
+        int stationaryTicks;
+        boolean inventoryNeutralized;
+        boolean valid;
+    }
+
+    private static final ThreadLocal<Snapshot> SNAPSHOT = ThreadLocal.withInitial(Snapshot::new);
 
     private HullbackBehavior() {}
 
@@ -66,14 +67,8 @@ public final class HullbackBehavior implements DisguiseBehavior {
 
         snapshot(disguise);
 
-        // Pre-condition prevPartPositions to the rigid layout, force stationaryTicks > 0
-        // (kills swimCycle), then re-run updatePartPositions() so every array and sub-entity
-        // is written in one consistent pass.
-        //
-        // HullbackRenderer (lines 108-242) lerps partPosition[i]/oldPartPosition[i] by
-        // partialTicks; stale prevPart values cause body/tail/fluke to lag behind the head
-        // (HullbackEntity:3440-3445). Setting prevPart[i] to the rigid target makes the
-        // lerp identity. stationaryTicks=60 gates swimCycle=0 (HullbackEntity:3407).
+        // Seed prevPart to the rigid target (lerp identity) and pin stationaryTicks > 0
+        // (kills swimCycle), then re-run updatePartPositions for one consistent pass.
         rigidLayoutViaUpdatePartPositions(disguise);
     }
 
@@ -117,10 +112,7 @@ public final class HullbackBehavior implements DisguiseBehavior {
             }
         } catch (ReflectiveOperationException ignored) {}
 
-        // Pre-position sub-entities to the rigid layout. setOldPosAndRots() runs in
-        // tick():1592-1594, not inside updatePartPositions, so it read the previous
-        // sub-entity positions; oldPartPosition is already overwritten above. This
-        // ensures any code path reading sub-entity positions gets matching data.
+        // Pre-position sub-entities to the rigid layout so any read path matches.
         if (disguise.isMultipartEntity()) {
             PartEntity<?>[] parts = disguise.getParts();
             if (parts != null) {
@@ -146,97 +138,115 @@ public final class HullbackBehavior implements DisguiseBehavior {
     @Override
     public void postRender(LivingEntity wearer, LivingEntity disguise, float partialTick, boolean inInventory) {
         if (!inInventory) return;
-        if (savedPartPosition == null) return;
-        restore(disguise);
-        if (savedInventoryNeutralized) {
+        Snapshot s = SNAPSHOT.get();
+        if (!s.valid) return;
+        restore(disguise, s);
+        if (s.inventoryNeutralized) {
             try {
                 if (stationaryTicksField != null) {
-                    stationaryTicksField.setInt(disguise, savedStationaryTicks);
+                    stationaryTicksField.setInt(disguise, s.stationaryTicks);
                 }
-            } catch (ReflectiveOperationException ignored) {}
-            savedInventoryNeutralized = false;
+            } catch (ReflectiveOperationException | IllegalArgumentException ignored) {}
+            s.inventoryNeutralized = false;
         }
-        clearSnapshot();
+        clearSnapshot(s);
     }
 
     private void snapshot(LivingEntity disguise) {
+        Snapshot s = SNAPSHOT.get();
+        s.valid = false;
         try {
-            savedPartPosition = cloneVec3Array((Vec3[]) partPositionField.get(disguise));
-            savedPartYRot = ((float[]) partYRotField.get(disguise)).clone();
-            savedPartXRot = ((float[]) partXRotField.get(disguise)).clone();
-            savedPrevPartPositions = cloneVec3Array((Vec3[]) prevPartPositionsField.get(disguise));
-            savedOldPartPosition = cloneVec3Array((Vec3[]) oldPartPositionField.get(disguise));
-            savedOldPartYRot = ((float[]) oldPartYRotField.get(disguise)).clone();
-            savedOldPartXRot = ((float[]) oldPartXRotField.get(disguise)).clone();
-            snapshotSubEntities(disguise);
-            // Snapshot stationaryTicks — preRender writes 60 to kill swimCycle; postRender restores.
+            s.partPosition = cloneVec3Array(readVec3Array(partPositionField, disguise));
+            s.partYRot = cloneFloatArray(readFloatArray(partYRotField, disguise));
+            s.partXRot = cloneFloatArray(readFloatArray(partXRotField, disguise));
+            s.prevPartPositions = cloneVec3Array(readVec3Array(prevPartPositionsField, disguise));
+            s.oldPartPosition = cloneVec3Array(readVec3Array(oldPartPositionField, disguise));
+            s.oldPartYRot = cloneFloatArray(readFloatArray(oldPartYRotField, disguise));
+            s.oldPartXRot = cloneFloatArray(readFloatArray(oldPartXRotField, disguise));
+            snapshotSubEntities(disguise, s);
             if (stationaryTicksField != null) {
-                savedStationaryTicks = stationaryTicksField.getInt(disguise);
-                savedInventoryNeutralized = true;
+                s.stationaryTicks = stationaryTicksField.getInt(disguise);
+                s.inventoryNeutralized = true;
             }
-        } catch (ReflectiveOperationException ignored) {
-            clearSnapshot();
+            s.valid = true;
+        } catch (ReflectiveOperationException | IllegalArgumentException ignored) {
+            clearSnapshot(s);
         }
     }
 
-    private void snapshotSubEntities(LivingEntity disguise) {
+    private void snapshotSubEntities(LivingEntity disguise, Snapshot s) {
         if (!disguise.isMultipartEntity()) return;
         PartEntity<?>[] parts = disguise.getParts();
         if (parts == null) return;
-        savedSubEntityPos = new Vec3[parts.length];
-        savedSubEntityYRot = new float[parts.length];
-        savedSubEntityXRot = new float[parts.length];
-        savedSubEntityYRotO = new float[parts.length];
-        savedSubEntityXRotO = new float[parts.length];
+        s.subEntityPos = new Vec3[parts.length];
+        s.subEntityYRot = new float[parts.length];
+        s.subEntityXRot = new float[parts.length];
+        s.subEntityYRotO = new float[parts.length];
+        s.subEntityXRotO = new float[parts.length];
         for (int i = 0; i < parts.length; i++) {
-            savedSubEntityPos[i] = parts[i].position();
-            savedSubEntityYRot[i] = parts[i].getYRot();
-            savedSubEntityXRot[i] = parts[i].getXRot();
-            savedSubEntityYRotO[i] = parts[i].yRotO;
-            savedSubEntityXRotO[i] = parts[i].xRotO;
+            s.subEntityPos[i] = parts[i].position();
+            s.subEntityYRot[i] = parts[i].getYRot();
+            s.subEntityXRot[i] = parts[i].getXRot();
+            s.subEntityYRotO[i] = parts[i].yRotO;
+            s.subEntityXRotO[i] = parts[i].xRotO;
         }
     }
 
-    private void restore(LivingEntity disguise) {
+    private void restore(LivingEntity disguise, Snapshot s) {
         try {
-            writeVec3Array(disguise, partPositionField, savedPartPosition);
-            writeFloatArray(disguise, partYRotField, savedPartYRot);
-            writeFloatArray(disguise, partXRotField, savedPartXRot);
-            writeVec3Array(disguise, prevPartPositionsField, savedPrevPartPositions);
-            writeVec3Array(disguise, oldPartPositionField, savedOldPartPosition);
-            writeFloatArray(disguise, oldPartYRotField, savedOldPartYRot);
-            writeFloatArray(disguise, oldPartXRotField, savedOldPartXRot);
-            restoreSubEntities(disguise);
-        } catch (ReflectiveOperationException ignored) {}
+            writeVec3Array(disguise, partPositionField, s.partPosition);
+            writeFloatArray(disguise, partYRotField, s.partYRot);
+            writeFloatArray(disguise, partXRotField, s.partXRot);
+            writeVec3Array(disguise, prevPartPositionsField, s.prevPartPositions);
+            writeVec3Array(disguise, oldPartPositionField, s.oldPartPosition);
+            writeFloatArray(disguise, oldPartYRotField, s.oldPartYRot);
+            writeFloatArray(disguise, oldPartXRotField, s.oldPartXRot);
+            restoreSubEntities(disguise, s);
+        } catch (ReflectiveOperationException | IllegalArgumentException ignored) {}
     }
 
-    private void restoreSubEntities(LivingEntity disguise) {
-        if (savedSubEntityPos == null) return;
+    private void restoreSubEntities(LivingEntity disguise, Snapshot s) {
+        if (s.subEntityPos == null) return;
         if (!disguise.isMultipartEntity()) return;
         PartEntity<?>[] parts = disguise.getParts();
-        if (parts == null || parts.length != savedSubEntityPos.length) return;
+        if (parts == null || parts.length != s.subEntityPos.length) return;
         for (int i = 0; i < parts.length; i++) {
-            parts[i].setPos(savedSubEntityPos[i].x, savedSubEntityPos[i].y, savedSubEntityPos[i].z);
-            parts[i].setYRot(savedSubEntityYRot[i]);
-            parts[i].setXRot(savedSubEntityXRot[i]);
-            parts[i].yRotO = savedSubEntityYRotO[i];
-            parts[i].xRotO = savedSubEntityXRotO[i];
+            parts[i].setPos(s.subEntityPos[i].x, s.subEntityPos[i].y, s.subEntityPos[i].z);
+            parts[i].setYRot(s.subEntityYRot[i]);
+            parts[i].setXRot(s.subEntityXRot[i]);
+            parts[i].yRotO = s.subEntityYRotO[i];
+            parts[i].xRotO = s.subEntityXRotO[i];
         }
     }
 
-    private void clearSnapshot() {
-        savedPartPosition = null;
-        savedPartYRot = null;
-        savedPartXRot = null;
-        savedPrevPartPositions = null;
-        savedOldPartPosition = null;
-        savedOldPartYRot = null;
-        savedOldPartXRot = null;
-        savedSubEntityPos = null;
-        savedSubEntityYRot = null;
-        savedSubEntityXRot = null;
-        savedSubEntityYRotO = null;
-        savedSubEntityXRotO = null;
+    private void clearSnapshot(Snapshot s) {
+        s.partPosition = null;
+        s.partYRot = null;
+        s.partXRot = null;
+        s.prevPartPositions = null;
+        s.oldPartPosition = null;
+        s.oldPartYRot = null;
+        s.oldPartXRot = null;
+        s.subEntityPos = null;
+        s.subEntityYRot = null;
+        s.subEntityXRot = null;
+        s.subEntityYRotO = null;
+        s.subEntityXRotO = null;
+        s.valid = false;
+    }
+
+    private static Vec3[] readVec3Array(Field field, LivingEntity target) throws ReflectiveOperationException {
+        if (field == null) return null;
+        return (Vec3[]) field.get(target);
+    }
+
+    private static float[] readFloatArray(Field field, LivingEntity target) throws ReflectiveOperationException {
+        if (field == null) return null;
+        return (float[]) field.get(target);
+    }
+
+    private static float[] cloneFloatArray(float[] src) {
+        return src == null ? null : src.clone();
     }
 
     private static Vec3[] cloneVec3Array(Vec3[] src) {
@@ -247,14 +257,14 @@ public final class HullbackBehavior implements DisguiseBehavior {
     private static void writeVec3Array(LivingEntity target, Field field, Vec3[] value) throws ReflectiveOperationException {
         if (field == null || value == null) return;
         Vec3[] dst = (Vec3[]) field.get(target);
-        if (dst.length != value.length) field.set(target, value); // shouldn't happen, but safe
+        if (dst == null || dst.length != value.length) field.set(target, value);
         else System.arraycopy(value, 0, dst, 0, value.length);
     }
 
     private static void writeFloatArray(LivingEntity target, Field field, float[] value) throws ReflectiveOperationException {
         if (field == null || value == null) return;
         float[] dst = (float[]) field.get(target);
-        if (dst.length != value.length) field.set(target, value);
+        if (dst == null || dst.length != value.length) field.set(target, value);
         else System.arraycopy(value, 0, dst, 0, value.length);
     }
 
@@ -262,30 +272,19 @@ public final class HullbackBehavior implements DisguiseBehavior {
         if (reflectionInited) return;
         synchronized (HullbackBehavior.class) {
             if (reflectionInited) return;
-            // Set reflectionInited LAST — transient failure must not lock out future retries.
             try {
                 updatePartPositionsMethod = hullbackClass.getDeclaredMethod("updatePartPositions");
                 updatePartPositionsMethod.setAccessible(true);
             } catch (ReflectiveOperationException ignored) {}
-            partPositionField = grabField(hullbackClass, "partPosition");
-            partYRotField = grabField(hullbackClass, "partYRot");
-            partXRotField = grabField(hullbackClass, "partXRot");
-            prevPartPositionsField = grabField(hullbackClass, "prevPartPositions");
-            oldPartPositionField = grabField(hullbackClass, "oldPartPosition");
-            oldPartYRotField = grabField(hullbackClass, "oldPartYRot");
-            oldPartXRotField = grabField(hullbackClass, "oldPartXRot");
-            stationaryTicksField = grabField(hullbackClass, "stationaryTicks");
+            partPositionField = ReflectionHelper.declaredField(hullbackClass, "partPosition");
+            partYRotField = ReflectionHelper.declaredField(hullbackClass, "partYRot");
+            partXRotField = ReflectionHelper.declaredField(hullbackClass, "partXRot");
+            prevPartPositionsField = ReflectionHelper.declaredField(hullbackClass, "prevPartPositions");
+            oldPartPositionField = ReflectionHelper.declaredField(hullbackClass, "oldPartPosition");
+            oldPartYRotField = ReflectionHelper.declaredField(hullbackClass, "oldPartYRot");
+            oldPartXRotField = ReflectionHelper.declaredField(hullbackClass, "oldPartXRot");
+            stationaryTicksField = ReflectionHelper.declaredField(hullbackClass, "stationaryTicks");
             reflectionInited = true;
-        }
-    }
-
-    private static Field grabField(Class<?> clazz, String name) {
-        try {
-            Field f = clazz.getDeclaredField(name);
-            f.setAccessible(true);
-            return f;
-        } catch (NoSuchFieldException e) {
-            return null;
         }
     }
 

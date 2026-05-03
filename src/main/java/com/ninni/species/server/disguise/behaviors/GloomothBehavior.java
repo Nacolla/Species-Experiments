@@ -2,6 +2,7 @@ package com.ninni.species.server.disguise.behaviors;
 
 import com.ninni.species.api.disguise.DisguiseBehavior;
 import com.ninni.species.server.disguise.dsl.WearerPredicates;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 
@@ -53,16 +54,8 @@ public final class GloomothBehavior implements DisguiseBehavior {
         if (reflectionInited) return;
         synchronized (GloomothBehavior.class) {
             if (reflectionInited) return;
-            try {
-                Field f = entityClass.getDeclaredField("flightRoll");
-                f.setAccessible(true);
-                if (f.getType() == float.class) flightRollField = f;
-            } catch (NoSuchFieldException ignored) {}
-            try {
-                Field f = entityClass.getDeclaredField("prevFlightRoll");
-                f.setAccessible(true);
-                if (f.getType() == float.class) prevFlightRollField = f;
-            } catch (NoSuchFieldException ignored) {}
+            flightRollField = ReflectionHelper.declaredFieldOfType(entityClass, "flightRoll", float.class);
+            prevFlightRollField = ReflectionHelper.declaredFieldOfType(entityClass, "prevFlightRoll", float.class);
             reflectionInited = true;
         }
     }

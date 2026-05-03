@@ -34,7 +34,6 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccess {
         this.harpoonId = id;
     }
 
-    /** Cosmetic hurt-sound override; hooks {@link Player#getHurtSound} (the LivingEntity inject never fires for players because Player overrides it). */
     @Inject(method = "getHurtSound", at = @At("HEAD"), cancellable = true)
     private void species$cosmeticHurtSound(DamageSource source, CallbackInfoReturnable<SoundEvent> cir) {
         Player self = (Player)(Object) this;
@@ -47,10 +46,6 @@ public abstract class PlayerMixin extends LivingEntity implements PlayerAccess {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Cosmetic death-sound override. Same rationale as {@link #species$cosmeticHurtSound}:
-     * {@code Player} overrides {@code getDeathSound}, so the hook must live here.
-     */
     @Inject(method = "getDeathSound", at = @At("HEAD"), cancellable = true)
     private void species$cosmeticDeathSound(CallbackInfoReturnable<SoundEvent> cir) {
         Player self = (Player)(Object) this;

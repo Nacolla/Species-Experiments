@@ -32,6 +32,24 @@ import net.minecraftforge.fml.common.Mod;
 @Mod.EventBusSubscriber(modid = Species.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public class ForgeClientEvents {
 
+    /** Per-type one-shot diagnostic flag for the disguise render path. Logs once per EntityType per session. */
+    private static final java.util.Set<net.minecraft.world.entity.EntityType<?>> DIAG_LOGGED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Behavior-owned poses skipped by {@link #syncWearerStateToDisguise}'s pose resync so
+     *  {@code onSyncedDataUpdated} animation hooks don't cancel mid-frame. */
+    private static final java.util.Set<net.minecraft.world.entity.Pose> BEHAVIOR_OWNED_POSES;
+    static {
+        java.util.Set<net.minecraft.world.entity.Pose> set =
+                java.util.EnumSet.noneOf(net.minecraft.world.entity.Pose.class);
+        for (com.ninni.species.server.entity.util.SpeciesPose sp :
+                com.ninni.species.server.entity.util.SpeciesPose.values()) {
+            set.add(sp.get());
+        }
+        set.add(net.minecraft.world.entity.Pose.ROARING);
+        BEHAVIOR_OWNED_POSES = java.util.Collections.unmodifiableSet(set);
+    }
+
     @SubscribeEvent
     public static void onRenderLivingSpecialPre(RenderLivingEvent.Pre<?, ?> event) {
         LivingEntity entity = event.getEntity();
@@ -77,39 +95,78 @@ public class ForgeClientEvents {
             EntityRenderDispatcher dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
             EntityRenderer<?> baseRenderer = dispatcher.getRenderer(disguise);
 
+            // Diagnostic: one-shot per disguise type. Confirms the render path is reached and reports
+            // the values the rest of the pipeline depends on. Useful for "model invisible" reports.
+            if (DIAG_LOGGED.add(disguise.getType())) {
+                float diagYOffset = com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.getWorldYOffset(disguise);
+                Species.LOGGER.info("[Species disguise] type={} renderer={} bbox={}x{} pos=({},{},{}) worldYOffset={}",
+                        net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(disguise.getType()),
+                        baseRenderer != null ? baseRenderer.getClass().getName() : "<null>",
+                        disguise.getBbWidth(), disguise.getBbHeight(),
+                        disguise.getX(), disguise.getY(), disguise.getZ(),
+                        diagYOffset);
+            }
+
             if (baseRenderer != null) {
                 PoseStack poseStack = event.getPoseStack();
                 MultiBufferSource buffer = event.getMultiBufferSource();
                 int light = event.getPackedLight();
-                float partialTick = event.getPartialTick();
+                // Armor stand statue render: pin partialTick=0 so the model's time-driven
+                // micro-anims (sin/cos of ageInTicks for breathing/bobbing/floating) don't
+                // oscillate frame-to-frame on the otherwise-frozen tickCount.
+                boolean wearerIsArmorStand = entity instanceof net.minecraft.world.entity.decoration.ArmorStand;
+                float partialTick = wearerIsArmorStand ? 0.0F : event.getPartialTick();
 
                 boolean inInventory = Minecraft.getInstance().getEntityRenderDispatcher() instanceof EntityRenderDispatcherAccess access
                         && access.getRenderingInventoryEntity();
 
                 syncWearerStateToDisguise(entity, disguise);
 
-                float bodyYaw = Mth.rotLerp(partialTick, entity.yBodyRotO, entity.yBodyRot);
-
-                // Recompute light via the disguise's renderer so per-renderer overrides apply.
-                int disguiseLight = light;
-                try {
-                    disguiseLight = ((EntityRenderer) baseRenderer).getPackedLightCoords(disguise, partialTick);
-                } catch (Throwable ignored) {}
-
                 com.ninni.species.api.disguise.DisguiseBehavior behavior =
                         com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(disguise);
-                try {
-                    behavior.preRender(entity, disguise, partialTick, inInventory);
-                } catch (Throwable ignored) {}
+
+                // entityYaw passed to the renderer is what MobRenderer.setupRotations uses to
+                // rotate the body model — using the wearer's lagging yBodyRot here would
+                // re-introduce the lag for snake/worm-like disguises that natively pin
+                // yBodyRot = getYRot(); read camera yaw directly when the behavior opts in.
+                float bodyYaw = behavior.bodyYawTracksCamera(disguise)
+                        ? Mth.rotLerp(partialTick, entity.yRotO, entity.getYRot())
+                        : Mth.rotLerp(partialTick, entity.yBodyRotO, entity.yBodyRot);
+
+                // Inventory render is GUI context — fullbright. In-world recomputes via the
+                // disguise's renderer for per-renderer overrides. Single-assignment so downstream
+                // lambdas can capture it.
+                final int disguiseLight;
                 if (inInventory) {
+                    disguiseLight = net.minecraft.client.renderer.LightTexture.FULL_BRIGHT;
+                } else {
+                    int computed = light;
                     try {
-                        behavior.preInventoryPose(entity, disguise, partialTick);
+                        computed = ((EntityRenderer) baseRenderer).getPackedLightCoords(disguise, partialTick);
                     } catch (Throwable ignored) {}
+                    disguiseLight = computed;
+                }
+                com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                        "disguise.preRender:" + disguise.getType(),
+                        () -> behavior.preRender(entity, disguise, partialTick, inInventory));
+                if (inInventory) {
+                    com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                            "disguise.preInventoryPose:" + disguise.getType(),
+                            () -> behavior.preInventoryPose(entity, disguise, partialTick));
                 }
 
                 // Push wearer onto DisguiseCosmeticContext for the texture-override mixin.
                 com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticContext.push(entity);
                 poseStack.pushPose();
+                // Per-type world Y offset: lifts/sinks the disguise relative to the wearer's feet.
+                // Used for ground-flat creatures (e.g. Triops) whose model sits at Y=0..0.2 and
+                // would otherwise render below normal sightlines.
+                float worldYOffset = com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.getWorldYOffset(disguise);
+                if (worldYOffset != 0.0F) poseStack.translate(0.0, worldYOffset, 0.0);
+                // Per-behavior dynamic Y offset — used for animation-driven hops (e.g. Spawn Seal
+                // bounce) whose visual height comes from physical impulse the disguise can't apply.
+                float behaviorYOffset = behavior.renderYOffset(entity, disguise, partialTick);
+                if (behaviorYOffset != 0.0F) poseStack.translate(0.0, behaviorYOffset, 0.0);
                 // bbHeight compensation: only ceiling-anchored types in hanging state.
                 if (isHeadAnchoredDisguise(disguise)
                         && com.ninni.species.server.disguise.dsl.WearerPredicates.CEILING_HANGING.test(entity)) {
@@ -131,13 +188,15 @@ public class ForgeClientEvents {
                     com.ninni.species.api.disguise.DisguiseRenderer renderOverride =
                             cosmetics.overrideRenderer(entity, disguise);
                     if (renderOverride != null) {
-                        try {
-                            renderOverride.render(entity, disguise, baseRenderer, bodyYaw, partialTick, poseStack, buffer, disguiseLight);
-                        } catch (Throwable ignored) {}
+                        com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                                "disguise.renderOverride:" + disguise.getType(),
+                                () -> renderOverride.render(entity, disguise, baseRenderer, bodyYaw, partialTick, poseStack, buffer, disguiseLight));
                     } else {
                         ((EntityRenderer) baseRenderer).render(disguise, bodyYaw, partialTick, poseStack, buffer, disguiseLight);
                     }
-                } catch (Throwable ignored) {
+                } catch (Throwable t) {
+                    com.ninni.species.server.disguise.DisguiseLogging.rateLimited(
+                            "disguise.render:" + disguise.getType(), t);
                 } finally {
                     poseStack.popPose();
                     com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticContext.pop();
@@ -147,12 +206,12 @@ public class ForgeClientEvents {
                 java.util.List<com.ninni.species.api.disguise.DisguiseRenderLayer> renderLayers =
                         com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.getRenderLayers(disguise);
                 if (!renderLayers.isEmpty()) {
+                    // Layer crashes are visual-only; continue rendering. Rate-limited dedup keeps the
+                    // log signal useful for layer authors without spamming the console per frame.
                     for (com.ninni.species.api.disguise.DisguiseRenderLayer layer : renderLayers) {
-                        try {
-                            layer.render(entity, disguise, poseStack, buffer, partialTick, disguiseLight, inInventory);
-                        } catch (Throwable ignored) {
-                            // Layer crashes are visual-only; continue rendering.
-                        }
+                        com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                                "disguise.renderLayer:" + disguise.getType(),
+                                () -> layer.render(entity, disguise, poseStack, buffer, partialTick, disguiseLight, inInventory));
                     }
                 }
 
@@ -175,20 +234,21 @@ public class ForgeClientEvents {
                             } catch (Throwable ignored) {}
                             subPoseStack.pushPose();
                             subPoseStack.translate(dx, dy, dz);
-                            try {
-                                ((EntityRenderer) subRenderer).render(sub, sub.getYRot(), subPartialTick, subPoseStack, subBuffer, subLight);
-                            } catch (Throwable ignored) {}
+                            final int subLightFinal = subLight;
+                            com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                                    "disguise.subEntityRender:" + sub.getType(),
+                                    () -> ((EntityRenderer) subRenderer).render(sub, sub.getYRot(), subPartialTick, subPoseStack, subBuffer, subLightFinal));
                             subPoseStack.popPose();
                         });
 
                 if (inInventory) {
-                    try {
-                        behavior.postInventoryPose(entity, disguise, partialTick);
-                    } catch (Throwable ignored) {}
+                    com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                            "disguise.postInventoryPose:" + disguise.getType(),
+                            () -> behavior.postInventoryPose(entity, disguise, partialTick));
                 }
-                try {
-                    behavior.postRender(entity, disguise, partialTick, inInventory);
-                } catch (Throwable ignored) {}
+                com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                        "disguise.postRender:" + disguise.getType(),
+                        () -> behavior.postRender(entity, disguise, partialTick, inInventory));
             }
         }
 
@@ -215,9 +275,26 @@ public class ForgeClientEvents {
                 && access.getRenderingInventoryEntity();
 
         float yawOffset = behavior.yawOffset(disguise);
-        boolean shouldApplyXRot = behavior.shouldApplyXRot(wearer, disguise, inInventory);
-        float xRotForDisguise = shouldApplyXRot ? wearer.getXRot() : 0.0F;
-        float xRotOForDisguise = shouldApplyXRot ? wearer.xRotO : 0.0F;
+        // Armor stand pose drives head/pitch — the wearer's xRot would point wherever the player
+        // happened to be looking when nudging the stand.
+        boolean isArmorStand = wearer instanceof net.minecraft.world.entity.decoration.ArmorStand;
+        float xRotForDisguise;
+        float xRotOForDisguise;
+        if (isArmorStand) {
+            net.minecraft.core.Rotations head = ((net.minecraft.world.entity.decoration.ArmorStand) wearer).getHeadPose();
+            xRotForDisguise = head.getX();
+            xRotOForDisguise = head.getX();
+        } else {
+            boolean shouldApplyXRot = behavior.shouldApplyXRot(wearer, disguise, inInventory);
+            xRotForDisguise = shouldApplyXRot ? wearer.getXRot() : 0.0F;
+            xRotOForDisguise = shouldApplyXRot ? wearer.xRotO : 0.0F;
+        }
+        // Snake/worm-like disguises pin yBodyRot = getYRot() in their own tick; sourcing the
+        // body yaw from the wearer's lagging yBodyRot would re-introduce the lag every render
+        // frame and freeze the head while chain segments swing past it.
+        boolean bodyTracksCamera = behavior.bodyYawTracksCamera(disguise);
+        float yBodyRotForDisguise = (bodyTracksCamera ? wearer.getYRot() : wearer.yBodyRot) + yawOffset;
+        float yBodyRotOForDisguise = (bodyTracksCamera ? wearer.yRotO : wearer.yBodyRotO) + yawOffset;
 
         disguise.setPos(wearer.getX(), wearer.getY(), wearer.getZ());
         disguise.xo = wearer.xo;
@@ -231,16 +308,35 @@ public class ForgeClientEvents {
         disguise.zOld = wearer.zOld;
         disguise.setDeltaMovement(wearer.getDeltaMovement());
 
-        disguise.setYRot(wearer.getYRot() + yawOffset);
-        disguise.yRotO = wearer.yRotO + yawOffset;
         disguise.setXRot(xRotForDisguise);
         disguise.xRotO = xRotOForDisguise;
-        disguise.yBodyRot = wearer.yBodyRot + yawOffset;
-        disguise.yBodyRotO = wearer.yBodyRotO + yawOffset;
-        disguise.yHeadRot = wearer.yHeadRot + yawOffset;
-        disguise.yHeadRotO = wearer.yHeadRotO + yawOffset;
+        // Armor stand: the HeadPose Y delta drives the whole-body facing direction so segment
+        // chains follow head orientation; non-chain mobs end up with head/body aligned (head-bone
+        // delta = 0). Other wearers keep the standard split between body and head yaw.
+        if (isArmorStand) {
+            float headYawDelta = ((net.minecraft.world.entity.decoration.ArmorStand) wearer).getHeadPose().getY();
+            float poseYaw = wearer.getYRot() + headYawDelta + yawOffset;
+            float poseYawO = wearer.yRotO + headYawDelta + yawOffset;
+            disguise.setYRot(poseYaw);
+            disguise.yRotO = poseYawO;
+            disguise.yBodyRot = poseYaw;
+            disguise.yBodyRotO = poseYawO;
+            disguise.yHeadRot = poseYaw;
+            disguise.yHeadRotO = poseYawO;
+        } else {
+            disguise.setYRot(wearer.getYRot() + yawOffset);
+            disguise.yRotO = wearer.yRotO + yawOffset;
+            disguise.yBodyRot = yBodyRotForDisguise;
+            disguise.yBodyRotO = yBodyRotOForDisguise;
+            disguise.yHeadRot = wearer.yHeadRot + yawOffset;
+            disguise.yHeadRotO = wearer.yHeadRotO + yawOffset;
+        }
 
-        disguise.tickCount = wearer.tickCount;
+        // Armor stand statue render: freeze tickCount so setupAnim's ageInTicks is constant —
+        // otherwise time-driven micro-animations would tick on the motionless model.
+        if (!isArmorStand) {
+            disguise.tickCount = wearer.tickCount;
+        }
         disguise.hurtTime = wearer.hurtTime;
         disguise.hurtDuration = wearer.hurtDuration;
         disguise.deathTime = wearer.deathTime;
@@ -249,7 +345,13 @@ public class ForgeClientEvents {
         disguise.swinging = wearer.swinging;
         disguise.swingTime = wearer.swingTime;
         disguise.swingingArm = wearer.swingingArm;
-        disguise.setPose(wearer.getPose());
+        // Only sync the pose when the disguise isn't currently in a behavior-managed pose
+        // (e.g. SpeciesPose.ATTACK / LAYING_DOWN set by onSpecialAction). Without this gate the
+        // resync runs every render frame, flickering the custom pose back to STANDING and
+        // killing the animation that started in onSyncedDataUpdated.
+        if (!BEHAVIOR_OWNED_POSES.contains(disguise.getPose())) {
+            disguise.setPose(wearer.getPose());
+        }
 
         WalkAnimationState src = wearer.walkAnimation;
         WalkAnimationState dst = disguise.walkAnimation;

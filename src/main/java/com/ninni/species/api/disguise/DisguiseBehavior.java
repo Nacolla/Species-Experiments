@@ -9,11 +9,7 @@ import net.minecraft.world.entity.player.Player;
  */
 public interface DisguiseBehavior {
 
-    /**
-     * Called once when the disguise instance is first created from the mask's NBT.
-     * Use for one-time setup that survives across ticks (e.g. {@code addTag},
-     * {@code setSilent}, special phase forces).
-     */
+    /** Called once at disguise creation; one-time setup that survives across ticks. */
     default void onCreated(LivingEntity wearer, LivingEntity disguise) {}
 
     /**
@@ -31,10 +27,7 @@ public interface DisguiseBehavior {
     /** Called each tick after {@code disguise.tick()} and default realignment. */
     default void postTick(LivingEntity wearer, LivingEntity disguise) {}
 
-    /**
-     * Called each frame before {@code renderer.render(disguise, …)}.
-     * @param inInventory true for inventory preview render, false in world.
-     */
+    /** Called each frame before {@code renderer.render(disguise, …)}. */
     default void preRender(LivingEntity wearer, LivingEntity disguise, float partialTick, boolean inInventory) {}
 
     /** Called each frame after the renderer returns. Restore any state overridden in {@link #preRender}. */
@@ -73,5 +66,32 @@ public interface DisguiseBehavior {
      */
     default boolean preserveRotationDeltaInAiStep() {
         return true;
+    }
+
+    /** Whether body yaw tracks the wearer's camera yaw instead of body yaw. Snake/worm chains
+     *  that natively pin {@code yBodyRot = getYRot()} need this so segments don't swing past a
+     *  stuck head; receives {@code disguise} so global behaviors can scope by type. */
+    default boolean bodyYawTracksCamera(LivingEntity disguise) {
+        return false;
+    }
+
+    /** Per-frame Y offset (blocks) added to the disguise's render position. For impulse-driven
+     *  locomotion (jumps, hops) that the pinned-in-place pipeline can't reproduce. */
+    default float renderYOffset(LivingEntity wearer, LivingEntity disguise, float partialTick) {
+        return 0F;
+    }
+
+    /** Fired on the special-action keybind; switch on {@code context} for per-scenario animations
+     *  or ignore it for context-agnostic behavior. */
+    default void onSpecialAction(LivingEntity wearer, LivingEntity disguise, ActionContext context) {}
+
+    /** Lambda-friendly factory for behaviors that only need the special-action hook. */
+    static DisguiseBehavior specialAction(SpecialActionHandler handler) {
+        return new DisguiseBehavior() {
+            @Override
+            public void onSpecialAction(LivingEntity wearer, LivingEntity disguise, ActionContext context) {
+                handler.handle(wearer, disguise, context);
+            }
+        };
     }
 }

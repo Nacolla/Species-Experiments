@@ -18,12 +18,6 @@ public final class DisguiseBodyRegistry {
 
     private DisguiseBodyRegistry() {}
 
-    public static void register(LivingEntity disguise) {
-        if (disguise == null) return;
-        BY_ID.put(disguise.getId(), disguise);
-    }
-
-    /** Variant that also stores the wearer so {@link #getWearer} can resolve back to it. */
     public static void register(LivingEntity disguise, LivingEntity wearer) {
         if (disguise == null) return;
         BY_ID.put(disguise.getId(), disguise);
@@ -55,11 +49,8 @@ public final class DisguiseBodyRegistry {
         return disguise;
     }
 
-    /**
-     * Returns true iff this entity was created by Species' disguise pipeline and is
-     * currently registered. Identity check: returns false for natural mobs of the
-     * same type, for the wearer, and for bodies whose new entry hasn't yet registered.
-     */
+    /** True iff {@code entity} is a registered disguise body (identity-checked). False for
+     *  natural mobs of the same type, the wearer, or unregistered new bodies. */
     public static boolean isDisguiseBody(net.minecraft.world.entity.Entity entity) {
         if (entity == null) return false;
         LivingEntity registered = BY_ID.get(entity.getId());

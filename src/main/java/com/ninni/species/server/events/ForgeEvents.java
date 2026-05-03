@@ -4,7 +4,6 @@ import com.ninni.species.Species;
 import com.ninni.species.mixin_util.LivingEntityAccess;
 import com.ninni.species.server.disguise.BoundroidPairManager;
 import com.ninni.species.server.disguise.DisguiseBodyRegistry;
-import com.ninni.species.server.disguise.GumWormSegmentManager;
 import com.ninni.species.server.disguise.MineGuardianAnchorManager;
 import com.ninni.species.server.entity.mob.update_2.Springling;
 import net.minecraft.world.entity.LivingEntity;
@@ -31,11 +30,8 @@ public class ForgeEvents {
         }
     }
 
-    /**
-     * Cleans up disguise manager state when a wearer leaves a level (dimension change,
-     * logout, despawn). Without this, static segment/companion maps grow unbounded.
-     * Also unregisters the disguise body from {@link DisguiseBodyRegistry}.
-     */
+    /** Cleans up disguise state on level-leave (dimension change, logout, despawn) and
+     *  unregisters from {@link DisguiseBodyRegistry}; without this, static maps grow unbounded. */
     @SubscribeEvent
     public static void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
         if (event.getEntity() instanceof LivingEntity wearer) {
@@ -45,9 +41,9 @@ public class ForgeEvents {
                     DisguiseBodyRegistry.unregister(disguise);
                 }
             } catch (Throwable ignored) {}
-            // Manager methods gate on isClientSide internally.
+            // Cleanup all registered chain managers (Gum Worm, Centipede, Anaconda, etc.).
             try {
-                GumWormSegmentManager.removeSegments(wearer);
+                com.ninni.species.server.disguise.panacea.SegmentChainManager.cleanupAll(wearer);
             } catch (Throwable ignored) {}
             try {
                 BoundroidPairManager.removeCompanion(wearer);

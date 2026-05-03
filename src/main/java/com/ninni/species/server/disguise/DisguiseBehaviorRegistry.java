@@ -55,7 +55,12 @@ public final class DisguiseBehaviorRegistry {
     /** Composed result for the disguise's type, never null. */
     public static DisguiseBehavior get(LivingEntity disguise) {
         if (disguise == null) return DefaultDisguiseBehavior.INSTANCE;
-        EntityType<?> type = disguise.getType();
+        return get(disguise.getType());
+    }
+
+    /** Composed result for an entity type, never null. */
+    public static DisguiseBehavior get(EntityType<?> type) {
+        if (type == null) return DefaultDisguiseBehavior.INSTANCE;
         return COMPOSED_CACHE.computeIfAbsent(type, DisguiseBehaviorRegistry::compute);
     }
 

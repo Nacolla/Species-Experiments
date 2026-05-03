@@ -26,7 +26,7 @@ public record DisguiseData(
         @Nullable Double cameraSizeMin,
         List<MobEffectInstance> wearerEffects
 ) {
-    /** Convenience constructor with empty wearer effects, for backward-compat. */
+    /** Convenience constructor for entries that don't apply wearer effects. */
     public DisguiseData(@Nullable ResourceLocation texture, @Nullable SoundEvent hurtSound,
                         @Nullable SoundEvent deathSound, @Nullable SoundEvent ambientSound,
                         @Nullable Component nameTag, @Nullable Float worldScale,

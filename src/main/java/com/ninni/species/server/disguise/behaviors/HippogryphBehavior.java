@@ -2,6 +2,7 @@ package com.ninni.species.server.disguise.behaviors;
 
 import com.ninni.species.api.disguise.DisguiseBehavior;
 import com.ninni.species.server.disguise.dsl.CompositeDisguiseBehavior;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.world.entity.LivingEntity;
 
 import java.lang.reflect.Field;
@@ -35,11 +36,7 @@ public final class HippogryphBehavior {
         if (reflectionInited) return;
         synchronized (HippogryphBehavior.class) {
             if (reflectionInited) return;
-            try {
-                Field f = hippoClass.getField("airBorneCounter");
-                f.setAccessible(true);
-                airBorneCounterField = f;
-            } catch (NoSuchFieldException ignored) {}
+            airBorneCounterField = ReflectionHelper.declaredField(hippoClass, "airBorneCounter");
             reflectionInited = true;
         }
     }

@@ -12,9 +12,13 @@
     "BlockEntityTypeMixin",
     "EmeraldsForVillagerTypeItemMixin",
     "EnderDragonMixin",
+    "EntityPushDisguiseMixin",
     "FlowerPotBlockMixin",
     "alexscaves.EntityVesperMixin",
+    "alexsmobs.EntityVoidWormMixin",
+    "iceandfire.EntityDragonBaseMixin",
     "iceandfire.EntityHippogryphMixin",
+    "spawn.StickbugMixin",
     "ItemMixin",
     "LightningRodMixin",
     "LivingEntityMixin",
@@ -46,7 +50,8 @@
     "client.alexscaves.GossamerWormRendererMixin",
     "client.alexscaves.HullbreakerRendererMixin",
     "client.alexscaves.MineGuardianEntityMixin",
-    "client.alexscaves.TremorzillaRendererMixin"
+    "client.alexscaves.TremorzillaRendererMixin",
+    "client.spawn.TunaRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

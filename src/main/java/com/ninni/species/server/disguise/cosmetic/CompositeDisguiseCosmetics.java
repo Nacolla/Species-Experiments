@@ -79,6 +79,15 @@ public final class CompositeDisguiseCosmetics implements DisguiseCosmetics {
     }
 
     @Override
+    public void onSpecialAction(LivingEntity wearer, LivingEntity disguise,
+                                com.ninni.species.api.disguise.ActionContext context) {
+        for (DisguiseCosmetics c : children) {
+            try { c.onSpecialAction(wearer, disguise, context); }
+            catch (Throwable ignored) { /* visual side-effect; tick must continue */ }
+        }
+    }
+
+    @Override
     public Component overrideNameTag(LivingEntity wearer, LivingEntity disguise) {
         for (DisguiseCosmetics c : children) {
             Component v = c.overrideNameTag(wearer, disguise);

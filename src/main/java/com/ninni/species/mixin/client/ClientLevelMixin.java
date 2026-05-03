@@ -14,23 +14,22 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Client hooks: (1) {@code getEntity(int)} fallback to {@link DisguiseBodyRegistry#findById} so id-tracked particles
- * find disguise bodies (which aren't in the level's entity registry); (2) suppress particle emission during
- * {@code disguise.tick()} for the first-person wearer (gated by {@link DisguiseTickContext#isSuppressing}).
- */
+/** Resolves disguise bodies + segments via {@code getEntity(int)} fallback, and suppresses
+ *  {@code disguise.tick()} particles for the first-person wearer. */
 @OnlyIn(Dist.CLIENT)
 @Mixin(ClientLevel.class)
 public abstract class ClientLevelMixin {
 
     @Inject(method = "getEntity(I)Lnet/minecraft/world/entity/Entity;", at = @At("RETURN"), cancellable = true)
     private void species$disguiseBodyLookupFallback(int id, CallbackInfoReturnable<Entity> cir) {
-        if (cir.getReturnValue() != null) return; // standard lookup found something
+        if (cir.getReturnValue() != null) return;
         LivingEntity disguise = DisguiseBodyRegistry.findById(id);
-        if (disguise != null) cir.setReturnValue(disguise);
+        if (disguise != null) { cir.setReturnValue(disguise); return; }
+        // Chain segments aren't in the ClientLevel; resolve via the chain manager.
+        Entity segment = com.ninni.species.server.disguise.panacea.SegmentChainManager.findById(id);
+        if (segment != null) cir.setReturnValue(segment);
     }
 
-    /** Covers both {@code addParticle} overloads — the no-force one routes through this signature. */
     @Inject(
             method = "addParticle(Lnet/minecraft/core/particles/ParticleOptions;ZDDDDDD)V",
             at = @At("HEAD"),
@@ -43,7 +42,6 @@ public abstract class ClientLevelMixin {
         if (DisguiseTickContext.isSuppressing()) ci.cancel();
     }
 
-    /** Same suppression for {@code addAlwaysVisibleParticle}; no-force overload also routes here. */
     @Inject(
             method = "addAlwaysVisibleParticle(Lnet/minecraft/core/particles/ParticleOptions;ZDDDDDD)V",
             at = @At("HEAD"),

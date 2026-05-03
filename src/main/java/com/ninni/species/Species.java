@@ -77,6 +77,7 @@ public class Species {
 			com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.registerDefaults();
 			com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticRegistry.registerDefaults();
 			com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticsDemo.registerDemo();
+			com.ninni.species.server.disguise.demo.ContextualActionDemo.registerDemo();
 			// Data-driven layer (datapack JSON via DisguiseDataReloadListener); per-type entries win.
 			com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticRegistry.registerGlobal(
 					com.ninni.species.server.disguise.data.DataDrivenCosmetics.INSTANCE);

@@ -16,11 +16,8 @@ import net.minecraft.world.level.Level;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 
-/**
- * Demo registrations covering every {@link DisguiseCosmetics} axis. Gated on the
- * {@code wickedMask.enableCosmeticsDemo} flag at invocation time — checking at
- * registration would race the SERVER config load.
- */
+/** Demo registrations covering every {@link DisguiseCosmetics} axis. Gated at invocation time
+ *  on {@code wickedMask.enableCosmeticsDemo} (checking at registration races SERVER config load). */
 public final class DisguiseCosmeticsDemo {
 
     private DisguiseCosmeticsDemo() {}

@@ -12,10 +12,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Recolors the disguise outline when the wearer is glowing. Hooks
- * {@code Entity.getTeamColor}, which vanilla reads to tint the outline buffer.
- */
+/** Override the glow-outline color for disguised wearers. */
 @Mixin(Entity.class)
 public abstract class EntityGlowColorMixin {
 

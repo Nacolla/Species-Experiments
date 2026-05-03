@@ -8,11 +8,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
-/**
- * Per-tick driver for {@code setterName(boolean)} flags on the disguise, each fed by a
- * wearer predicate. Replaces flag-writes the cleared AI goals would have produced.
- * Missing setters silently skip — the tick loop never throws.
- */
+/** Per-tick driver for {@code setterName(boolean)} flags on the disguise, each fed by a wearer
+ *  predicate. Replaces flag-writes the cleared AI goals would have produced; missing setters
+ *  silently skip. */
 public final class ReflectiveBooleanFlagBehavior implements DisguiseBehavior {
 
     /** Flag entry: setter name (public {@code boolean} method) + wearer predicate. */

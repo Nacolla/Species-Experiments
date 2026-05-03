@@ -160,7 +160,6 @@ public class Wicked extends Monster implements RangedAttackMob {
     public void tick() {
         super.tick();
 
-        //Sync hauntedTarget with the getHauntedTargetUUID nbt
         if (this.getHauntedTargetUUID() != null && this.hauntedTarget == null){
             this.level().getEntitiesOfClass(Mob.class, this.getBoundingBox().inflate(20), mob -> this.isSuitableForHaunting(mob) && mob.getUUID().equals(this.getHauntedTargetUUID())).forEach(mob -> this.haunt(mob, false));
         }
@@ -184,7 +183,6 @@ public class Wicked extends Monster implements RangedAttackMob {
         //Particles
         if (this.level() instanceof ServerLevel serverLevel && this.tickCount % 2 == 0) {
             if (isHaunting && hauntedTarget != null && this.random.nextFloat() < (float)this.getMana()/10) {
-                // Particles for the haunted mob
                 serverLevel.sendParticles(
                         SpeciesParticles.WICKED_FLAME.get(),
                         hauntedTarget.getRandomX(hauntedTarget.getBbWidth()),
@@ -195,7 +193,6 @@ public class Wicked extends Monster implements RangedAttackMob {
             }
             if (this.getMana() > 0) {
                 int particleAmount;
-                // Particles on top of wicked/haunted mob
                 switch (this.getMana()) {
                     case 2 -> particleAmount = 15;
                     case 3 -> particleAmount = 10;

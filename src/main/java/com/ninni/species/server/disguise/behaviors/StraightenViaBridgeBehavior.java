@@ -2,17 +2,16 @@ package com.ninni.species.server.disguise.behaviors;
 
 import com.ninni.species.api.disguise.DisguiseBehavior;
 import com.ninni.species.server.disguise.ModelStraightenBridge;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.world.entity.LivingEntity;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Inventory-only fix for AC mobs whose models read entity-internal rotation trackers.
- * Sets {@link ModelStraightenBridge#FORCE_STRAIGHTEN}, pins yaw/pitch to yBodyRot/0,
- * and zeros tailYaw/flightPitch/flightRoll (+prev) per cached reflective field lookup.
- */
+/** Inventory-only fix for AC mobs whose models read entity-internal rotation trackers. Sets
+ *  {@link ModelStraightenBridge#FORCE_STRAIGHTEN}, pins yaw/pitch to yBodyRot/0, and zeros
+ *  tailYaw/flightPitch/flightRoll (+prev). */
 public final class StraightenViaBridgeBehavior implements DisguiseBehavior {
 
     public static final StraightenViaBridgeBehavior INSTANCE = new StraightenViaBridgeBehavior();
@@ -114,23 +113,9 @@ public final class StraightenViaBridgeBehavior implements DisguiseBehavior {
     private static synchronized Field[] resolveFields(Class<?> entityClass) {
         Field[] cached = RESOLVED_FIELDS.get(entityClass);
         if (cached != null) return cached;
-
         Field[] resolved = new Field[RESET_FIELDS.length];
         for (int i = 0; i < RESET_FIELDS.length; i++) {
-            String name = RESET_FIELDS[i];
-            // Walk hierarchy so subclasses inheriting the field still resolve.
-            Class<?> c = entityClass;
-            while (c != null && c != Object.class) {
-                try {
-                    Field f = c.getDeclaredField(name);
-                    if (f.getType() == float.class) {
-                        f.setAccessible(true);
-                        resolved[i] = f;
-                        break;
-                    }
-                } catch (NoSuchFieldException ignored) {}
-                c = c.getSuperclass();
-            }
+            resolved[i] = ReflectionHelper.declaredFieldOfType(entityClass, RESET_FIELDS[i], float.class);
         }
         RESOLVED_FIELDS.put(entityClass, resolved);
         return resolved;

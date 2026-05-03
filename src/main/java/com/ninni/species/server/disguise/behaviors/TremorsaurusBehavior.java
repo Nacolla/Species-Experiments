@@ -11,11 +11,8 @@ public final class TremorsaurusBehavior implements DisguiseBehavior {
 
     public static final TremorsaurusBehavior INSTANCE = new TremorsaurusBehavior();
 
-    /**
-     * Multiplied into {@code walkAnimation.position} per frame (fed to model as {@code limbSwing}).
-     * Model multiplies by hardcoded {@code walkSpeed=0.8F} to drive phase
-     * ({@code Math.sin(limbSwing * walkSpeed)}). Reducing stretches the cycle; does NOT affect lift height.
-     */
+    /** Multiplied into {@code walkAnimation.position} per frame ({@code limbSwing}); reducing
+     *  stretches the cycle without affecting lift height. */
     private static final float WALK_ANIM_SPEED_MULTIPLIER = 0.7F;
 
     /** Scales leg-lift magnitude (limbSwingAmount); player-cadence amplitude on the large model is exaggerated, 0.55 normalises it. */

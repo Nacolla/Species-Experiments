@@ -14,10 +14,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
-/**
- * {@code @ModifyArg} on {@code Camera.setup}'s {@code getMaxZoom(D)} call, scaling 3rd/2nd-person distance
- * to fit large Wicked Mask disguises; vanilla block-collision clamp still applies afterwards.
- */
+/** Scales third/second-person camera distance to fit large Wicked Mask disguises. */
 @OnlyIn(Dist.CLIENT)
 @Mixin(Camera.class)
 public abstract class CameraMixin {
@@ -32,18 +29,16 @@ public abstract class CameraMixin {
         LivingEntity disguise = ((LivingEntityAccess) wearer).getDisguisedEntity();
         if (disguise == null || !disguise.getTags().contains(WickedMaskDisguiseEvents.DISGUISE_TAG)) return original;
 
-        // Intrinsic dimensions only — sub-entity union is position-dependent, and behaviors
-        // that move the disguise body (e.g. WinchDisguiseBehavior lift to ceiling) cause
-        // visualSize to oscillate as wearer.y fluctuates, jittering the camera. Use bbWidth/bbHeight
-        // (size, not span) plus the per-type cameraSizeMinimum floor for streaming-segment cases.
-        double intrinsic = Math.max(disguise.getBbWidth(), disguise.getBbHeight());
+        // Intrinsic AABB scaled by per-type factor (wings/sweep extending beyond bbox), with a
+        // per-type minimum floor for streaming chains. AABB updates dynamically (IaF stage,
+        // armor stand, etc.) so size tracks the current disguise state.
+        double intrinsic = Math.max(disguise.getBbWidth(), disguise.getBbHeight())
+                * com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.getCameraSizeFactor(disguise);
         double pinned = com.ninni.species.server.disguise.panacea.DisguiseTopologyRegistry.getCameraSizeMinimum(disguise);
         double visualSize = Math.max(intrinsic, pinned);
         if (visualSize <= DisguiseTopology.PLAYER_BASELINE) return original;
 
-        // Linear: +1.5 blocks of distance per extra block of silhouette. Gentler than
-        // a multiplicative ratio; cap at 48 so tier-5 IaF dragons and multi-segment
-        // giants still fit without over-extending smaller disguises.
+        // Linear scale (+1.5 per block of silhouette), capped at 48.
         double scaled = original + (visualSize - DisguiseTopology.PLAYER_BASELINE) * 1.5;
         return Math.min(scaled, 48.0);
     }

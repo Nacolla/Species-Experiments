@@ -1,6 +1,6 @@
 package com.ninni.species.server.disguise;
 
-import com.ninni.species.mixin_util.LivingEntityAccess;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.resources.ResourceLocation;
@@ -10,17 +10,14 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Spawns and manages a client-side companion {@code MineGuardianAnchorEntity} for MineGuardian disguises;
- * AC's chain renders via {@code MineGuardianAnchorRenderer} so the anchor is required for the chain visual.
- * Soft-dep, reflective; reverse (wearer-as-Anchor) is unsupported since Anchor isn't a LivingEntity.
- */
+/** Spawns a client-side {@code MineGuardianAnchorEntity} companion for MineGuardian disguises.
+ *  AC's chain renders via {@code MineGuardianAnchorRenderer}, so the anchor is required for
+ *  the chain visual. Soft-dep, reflective. */
 public final class MineGuardianAnchorManager {
 
     private static final ResourceLocation MINE_GUARDIAN_ID = new ResourceLocation("alexscaves", "mine_guardian");
@@ -163,14 +160,8 @@ public final class MineGuardianAnchorManager {
             if (anchorType != null) {
                 Entity probe = anchorType.create(level);
                 if (probe != null) {
-                    Class<?> c = probe.getClass();
-                    while (c != null && c != Object.class) {
-                        if (anchorGuardianIdAccessor == null) anchorGuardianIdAccessor = grabAccessor(c, "GUARDIAN_ID");
-                        c = c.getSuperclass();
-                    }
-                    try {
-                        anchorLinkWithGuardianMethod = probe.getClass().getMethod("linkWithGuardian", Entity.class);
-                    } catch (ReflectiveOperationException ignored) {}
+                    anchorGuardianIdAccessor = ReflectionHelper.accessor(probe.getClass(), "GUARDIAN_ID");
+                    anchorLinkWithGuardianMethod = ReflectionHelper.publicMethod(probe.getClass(), "linkWithGuardian", Entity.class);
                     probe.discard();
                 }
             }
@@ -178,36 +169,15 @@ public final class MineGuardianAnchorManager {
             if (guardianType != null) {
                 Entity probe = guardianType.create(level);
                 if (probe != null) {
-                    Class<?> c = probe.getClass();
-                    while (c != null && c != Object.class) {
-                        if (guardianAnchorIdAccessor == null) guardianAnchorIdAccessor = grabAccessor(c, "ANCHOR_ID");
-                        c = c.getSuperclass();
-                    }
-                    try {
-                        guardianSetAnchorUuidMethod = probe.getClass().getMethod("setAnchorUUID", UUID.class);
-                    } catch (ReflectiveOperationException ignored) {}
-                    try {
-                        guardianSetMaxChainLengthMethod = probe.getClass().getMethod("setMaxChainLength", int.class);
-                    } catch (ReflectiveOperationException ignored) {}
+                    guardianAnchorIdAccessor = ReflectionHelper.accessor(probe.getClass(), "ANCHOR_ID");
+                    guardianSetAnchorUuidMethod = ReflectionHelper.publicMethod(probe.getClass(), "setAnchorUUID", UUID.class);
+                    guardianSetMaxChainLengthMethod = ReflectionHelper.publicMethod(probe.getClass(), "setMaxChainLength", int.class);
                     probe.discard();
                 }
             }
 
-            // Set inited LAST so a transient resolution failure doesn't permanently lock out retry.
+            // Set inited last so a transient failure doesn't lock out retries.
             reflectionInited = true;
         }
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static EntityDataAccessor<Integer> grabAccessor(Class<?> clazz, String name) {
-        try {
-            Field f = clazz.getDeclaredField(name);
-            f.setAccessible(true);
-            Object value = f.get(null);
-            if (value instanceof EntityDataAccessor<?>) {
-                return (EntityDataAccessor<Integer>) value;
-            }
-        } catch (NoSuchFieldException | IllegalAccessException ignored) {}
-        return null;
     }
 }

@@ -16,11 +16,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/**
- * Render-time secondary suppression: cancels {@link SingleQuadParticle#render} for particles within
- * {@link #SUPPRESSION_RADIUS_SQ} of the camera while the local player is disguised in first-person.
- * Catches particles that slip past {@link com.ninni.species.mixin.client.ClientLevelMixin}'s addParticle gate.
- */
+/** Suppresses particles near the camera while the local player is disguised in first-person. */
 @OnlyIn(Dist.CLIENT)
 @Mixin(SingleQuadParticle.class)
 public abstract class SingleQuadParticleMixin {
@@ -32,17 +28,13 @@ public abstract class SingleQuadParticleMixin {
     private void species$skipParticleInFirstPersonDisguise(VertexConsumer buffer, Camera camera, float partialTicks, CallbackInfo ci) {
         Minecraft mc = Minecraft.getInstance();
         if (mc == null || mc.player == null) return;
-        // Quick exit: must be in first person.
         if (mc.options == null || mc.options.getCameraType() == null
                 || !mc.options.getCameraType().isFirstPerson()) {
             return;
         }
-        // Local player must be a wearer (have an active disguise).
         LivingEntity disguise = ((LivingEntityAccess) mc.player).getDisguisedEntity();
         if (disguise == null || disguise.isRemoved()) return;
 
-        // Use getBoundingBox() (public) rather than protected x/y/z fields to
-        // avoid needing an access transformer or @Shadow.
         Particle self = (Particle) (Object) this;
         AABB box = self.getBoundingBox();
         Vec3 center = box.getCenter();

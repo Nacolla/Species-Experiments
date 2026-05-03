@@ -6,11 +6,8 @@ import org.jetbrains.annotations.ApiStatus;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-/**
- * Per-thread wearer context for texture-override mixins during disguise body render.
- * Stack-based so nested renders (sub-entity that is itself a wearer) restore the outer
- * wearer on inner pop. {@link ThreadLocal} — push/pop only on the client render thread.
- */
+/** Per-thread wearer context for texture-override mixins during disguise body render. Stacked
+ *  so nested renders (sub-entity wearer) restore the outer wearer on pop. Render thread only. */
 @ApiStatus.Internal
 public final class DisguiseCosmeticContext {
 

@@ -10,11 +10,9 @@ import java.lang.reflect.Field;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
-/**
- * Forces AlexsCaves multipart models into their {@code straighten} pose for inventory render.
- * Conditional renderers (Lux/Atlatitan) use {@link #setStraightenViaReflection};
- * unconditional ones (Hullbreaker/Tremorzilla/GossamerWorm) read {@link #FORCE_STRAIGHTEN} via mixin.
- */
+/** Forces AC multipart models into their {@code straighten} pose for inventory render.
+ *  Conditional renderers use {@link #setStraightenViaReflection}; unconditional ones read
+ *  {@link #FORCE_STRAIGHTEN} via mixin. */
 public final class ModelStraightenBridge {
 
     /** Flipped on/off around the renderer.render call by behaviors. Read by Mixins. */

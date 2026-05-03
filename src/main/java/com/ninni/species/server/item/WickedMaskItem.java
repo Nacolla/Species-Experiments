@@ -74,40 +74,65 @@ public class WickedMaskItem extends Item implements Equipable, HasImportantInter
 
     @Override
     public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity entity, InteractionHand hand) {
-        if (entity.isAlive() && !entity.level().isClientSide && (!stack.hasTag() || !stack.getTag().contains("id")) && player.isSecondaryUseActive()) {
-            CompoundTag tag = stack.getOrCreateTag();
-
-            String encodeId = entity.getEncodeId();
-            if (encodeId != null) {
-                tag.putString("id", encodeId);
-                tag.putBoolean("OnGround", true);
-                if (entity instanceof Spectre spectre) {
-                    // Set base variant in NBT
-                    tag.putString("Type", Spectre.Type.SPECTRE.getSerializedName());
-                }
-
-                if (entity.hasCustomName() && !"jeb_".equals(entity.getName().getString())) {
-                    tag.putString("CustomName", Component.Serializer.toJson(entity.getCustomName()));
-                }
-                if (entity.isCustomNameVisible()) tag.putBoolean("CustomNameVisible", true);
-                if (!entity.getTags().isEmpty()) {
-                    ListTag listtag = new ListTag();
-                    for (String s : entity.getTags()) listtag.add(StringTag.valueOf(s));
-                    tag.put("Tags", listtag);
-                }
-                entity.addAdditionalSaveData(tag);
-
-                if (entity instanceof WitherBoss && player instanceof ServerPlayer serverPlayer) {
-                    SpeciesCriterion.WICKED_MASK_WITHER.trigger(serverPlayer);
-                }
-            }
-
-            player.setItemInHand(hand, stack);
-            entity.level().playSound(null, player.getX(), player.getY(), player.getZ(), SpeciesSoundEvents.WICKED_MASK_LINK.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
+        if (tryImprint(stack, entity, player, hand)) {
             return InteractionResult.SUCCESS;
         }
         if (entity instanceof Allay allay && !allay.hasItemInHand()) return InteractionResult.SUCCESS;
         return super.interactLivingEntity(stack, player, entity, hand);
+    }
+
+    /** Server-side imprint of {@code entity}'s NBT into an empty mask. Returns {@code true} when
+     *  the imprint ran. Public so the interaction-event handler can call it for multipart and
+     *  chain-segment paths that vanilla doesn't route to {@code interactLivingEntity}. */
+    public static boolean tryImprint(ItemStack stack, LivingEntity entity, Player player, InteractionHand hand) {
+        if (!entity.isAlive() || entity.level().isClientSide
+                || (stack.hasTag() && stack.getTag().contains("id"))
+                || !player.isSecondaryUseActive()) {
+            return false;
+        }
+        CompoundTag tag = stack.getOrCreateTag();
+
+        // Resolve the id from the registry, not entity.getEncodeId(): some chain-segment classes
+        // (AnacondaPart, BoneSerpentPart, VoidWormPart) override getEncodeId to return the head's
+        // id for save round-trip, which would mis-imprint the head when the player aimed at a part.
+        String fallbackEncodeId = entity.getEncodeId();
+        if (fallbackEncodeId != null) {
+            net.minecraft.resources.ResourceLocation typeKey =
+                    net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+            String encodeId = typeKey != null ? typeKey.toString() : fallbackEncodeId;
+            tag.putString("id", encodeId);
+            tag.putBoolean("OnGround", true);
+            if (entity instanceof Spectre spectre) {
+                // Set base variant in NBT
+                tag.putString("Type", Spectre.Type.SPECTRE.getSerializedName());
+            }
+
+            if (entity.hasCustomName() && !"jeb_".equals(entity.getName().getString())) {
+                tag.putString("CustomName", Component.Serializer.toJson(entity.getCustomName()));
+            }
+            if (entity.isCustomNameVisible()) tag.putBoolean("CustomNameVisible", true);
+            if (!entity.getTags().isEmpty()) {
+                ListTag listtag = new ListTag();
+                for (String s : entity.getTags()) listtag.add(StringTag.valueOf(s));
+                tag.put("Tags", listtag);
+            }
+            entity.addAdditionalSaveData(tag);
+
+            // Chain-segment redirect: when the captured type is a registered chain segment,
+            // remember the head so disguise load can swap to it under the server config flag.
+            // Stored unconditionally so toggling the config at runtime works without re-imprint.
+            com.ninni.species.server.disguise.ChainHeadRegistry.headFor(entity.getType())
+                    .map(net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE::getKey)
+                    .ifPresent(headKey -> tag.putString("species:head_id", headKey.toString()));
+
+            if (entity instanceof WitherBoss && player instanceof ServerPlayer serverPlayer) {
+                SpeciesCriterion.WICKED_MASK_WITHER.trigger(serverPlayer);
+            }
+        }
+
+        player.setItemInHand(hand, stack);
+        entity.level().playSound(null, player.getX(), player.getY(), player.getZ(), SpeciesSoundEvents.WICKED_MASK_LINK.get(), SoundSource.PLAYERS, 1.0F, 1.0F);
+        return true;
     }
 
     @Override

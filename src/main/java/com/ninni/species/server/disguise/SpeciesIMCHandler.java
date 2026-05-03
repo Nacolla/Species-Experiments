@@ -17,11 +17,8 @@ import java.util.function.Consumer;
  */
 public final class SpeciesIMCHandler {
 
-    /**
-     * Per-method handler: validates the payload class and forwards to a typed action.
-     * Type-erased {@code Consumer<Object>} internally; the runtime cast is safe because
-     * {@link #apply} guards on {@code isInstance} before invoking.
-     */
+    /** Per-method handler: validates payload type, then forwards to a typed action. The
+     *  type-erased cast is guarded by {@link #apply}'s {@code isInstance} check. */
     private record Dispatcher<T>(Class<T> payloadType, Consumer<? super T> action) {
         @SuppressWarnings("unchecked")
         void apply(InterModComms.IMCMessage msg, Object payload) {
@@ -61,6 +58,8 @@ public final class SpeciesIMCHandler {
                     Dispatcher.of(CameraSizeMinimumEntry.class, e -> SpeciesAPI.setCameraSizeMinimum(e.type(), e.minVisualSize()))),
             Map.entry(SpeciesIMCKeys.SET_INVENTORY_Y_OFFSET,
                     Dispatcher.of(InventoryYOffsetEntry.class, e -> SpeciesAPI.setInventoryYOffset(e.type(), e.yOffset()))),
+            Map.entry(SpeciesIMCKeys.SET_WORLD_Y_OFFSET,
+                    Dispatcher.of(WorldYOffsetEntry.class, e -> SpeciesAPI.setWorldYOffset(e.type(), e.yOffset()))),
             Map.entry(SpeciesIMCKeys.REGISTER_RENDER_LAYER,
                     Dispatcher.of(RenderLayerRegistration.class, r -> SpeciesAPI.registerRenderLayer(r.type(), r.layer())))
     );

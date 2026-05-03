@@ -79,4 +79,9 @@ public interface DisguiseCosmetics {
     default Collection<MobEffectInstance> wearerEffectsWhileWorn(LivingEntity wearer, LivingEntity disguise) {
         return Collections.emptyList();
     }
+
+    /** Visual-only special action (particles, scale tweaks, overlays — no synced state).
+     *  Runs alongside {@link DisguiseBehavior#onSpecialAction}; {@code context} mirrors the
+     *  behavior dispatch so visuals can match the gameplay variant. */
+    default void onSpecialAction(LivingEntity wearer, LivingEntity disguise, ActionContext context) {}
 }

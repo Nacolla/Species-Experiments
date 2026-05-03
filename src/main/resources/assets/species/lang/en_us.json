@@ -17,6 +17,7 @@
   "key.categories.species": "Species",
   "key.extend": "Springling Extend",
   "key.retract": "Springling Retract",
+  "key.species.disguise_action": "Disguise Special Action",
   "item.species.whenEaten": "When Consumed:",
 
   "entity.species.wraptor": "Wraptor",

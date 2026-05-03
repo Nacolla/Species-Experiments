@@ -122,7 +122,7 @@ public final class DisguiseTopology {
     }
 
     // --------------------------------------------------------------------
-    // Sub-entity render iteration — replaces inline Gum Worm + Boundroid loops
+    // Sub-entity render iteration
     // --------------------------------------------------------------------
 
     /** Iterates sub-entities for manual render dispatch; callback receives sub + offset relative to wearer. */

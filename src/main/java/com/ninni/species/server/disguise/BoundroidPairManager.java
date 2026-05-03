@@ -1,6 +1,7 @@
 package com.ninni.species.server.disguise;
 
 import com.ninni.species.mixin_util.LivingEntityAccess;
+import com.ninni.species.server.disguise.panacea.ReflectionHelper;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.resources.ResourceLocation;
@@ -16,11 +17,9 @@ import java.lang.reflect.Method;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Symmetric Boundroid+Winch companion manager. Spawns a trailing companion (Winch or Boundroid)
- * with rope physics; {@link #getPartnerForWinch} feeds {@code BoundroidWinchEntityMixin}'s {@code getHead}
- * redirect so {@code getChainTo}'s {@code instanceof BoundroidEntity} branch fires both directions.
- */
+/** Symmetric Boundroid+Winch companion manager. Spawns a trailing companion with rope physics;
+ *  {@link #getPartnerForWinch} feeds {@code BoundroidWinchEntityMixin}'s {@code getHead} redirect
+ *  so the {@code instanceof BoundroidEntity} branch in {@code getChainTo} fires both ways. */
 public final class BoundroidPairManager {
 
     private static final ResourceLocation BOUNDROID_ID = new ResourceLocation("alexscaves", "boundroid");
@@ -46,6 +45,11 @@ public final class BoundroidPairManager {
 
     /** Per-wearer companion entity (the one that trails). */
     private static final java.util.Map<UUID, Entity> COMPANIONS = new ConcurrentHashMap<>();
+
+    /** Per-wearer chain-rattle sound instance. Tracked so it can be stopped explicitly on
+     *  cleanup — the sound's {@code canPlaySound} otherwise sees the disguise body as alive
+     *  (the cleanup unregisters it but doesn't discard the entity). Client-only. */
+    private static final java.util.Map<UUID, com.ninni.species.client.sound.DisguiseBoundroidChainSound> CHAIN_SOUNDS = new ConcurrentHashMap<>();
 
     static {
         // Self-register as a Panacea sub-entity provider so the companion is
@@ -172,6 +176,13 @@ public final class BoundroidPairManager {
         } catch (ReflectiveOperationException ignored) {}
 
         COMPANIONS.put(wearer.getUUID(), companion);
+
+        try {
+            com.ninni.species.client.sound.DisguiseBoundroidChainSound sound =
+                    new com.ninni.species.client.sound.DisguiseBoundroidChainSound(disguise, companion);
+            CHAIN_SOUNDS.put(wearer.getUUID(), sound);
+            net.minecraft.client.Minecraft.getInstance().getSoundManager().queueTickingSound(sound);
+        } catch (Throwable ignored) {}
     }
 
     /** Per-tick companion physics: independent gravity/friction/momentum with soft pull + hard clamp at {@link #MAX_CHAIN_LENGTH}. */
@@ -300,11 +311,9 @@ public final class BoundroidPairManager {
         comp.setDeltaMovement(newVel);
         comp.tickCount = wearer.tickCount;
 
-        // ---- (7) Animation-state sync for a companion Boundroid. groundProgress drives
-        // the float-vs-ground blend (BoundroidEntity.tick:105-111); the companion's tick()
-        // never runs, so update it manually. Tolerance 0.15 blocks: tighter values flicker
-        // when soft-pull contributes micro-vertical force (~0.01-0.05 blocks), toggling
-        // isOnGround every tick and visibly jittering the blend.
+        // (7) Companion Boundroid animation sync. The companion's tick() never runs, so we
+        // update onGround + groundProgress manually. 0.15-block tolerance avoids micro-jitter
+        // from soft-pull vertical force toggling isOnGround every tick.
         boolean isOnGround = (newPos.y - surfaceY) < 0.15;
         comp.setOnGround(isOnGround);
         ResourceLocation typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(comp.getType());
@@ -369,6 +378,8 @@ public final class BoundroidPairManager {
             WINCH_PARTNER.entrySet().removeIf(e -> wearerUUID.equals(e.getValue().wearerUUID));
             if (!comp.isRemoved()) comp.discard();
         }
+        com.ninni.species.client.sound.DisguiseBoundroidChainSound sound = CHAIN_SOUNDS.remove(wearerUUID);
+        if (sound != null) sound.requestStop();
     }
 
     /** ThreadLocal scratch position for {@code computeSurfaceY} — avoids per-tick allocation.
@@ -387,11 +398,8 @@ public final class BoundroidPairManager {
         return 1.0 + pos.getY();
     }
 
-    /**
-     * Sync the Winch disguise's ceiling state. AC's natural tick is server-only-gated,
-     * so on the client these stay at defaults; without this LATCHED=false keeps hooks
-     * retracted and distanceToCeiling stays wrong.
-     */
+    /** Sync the Winch disguise's ceiling state — AC's natural tick is server-only, so without
+     *  this {@code LATCHED} stays false and the hooks render retracted. */
     private static void syncWinchCeilingDistance(LivingEntity wearer, LivingEntity disguise) {
         if (winchDistanceToCeilingField == null && winchLatchedAccessor == null) return;
         Level level = wearer.level();
@@ -426,20 +434,16 @@ public final class BoundroidPairManager {
         if (reflectionInited) return;
         synchronized (BoundroidPairManager.class) {
             if (reflectionInited) return;
-            // Set reflectionInited LAST so a transient resolution failure doesn't permanently lock out retry.
             winchType = BuiltInRegistries.ENTITY_TYPE.getOptional(BOUNDROID_WINCH_ID).orElse(null);
             boundroidType = BuiltInRegistries.ENTITY_TYPE.getOptional(BOUNDROID_ID).orElse(null);
 
             if (winchType != null) {
                 Entity probe = winchType.create(level);
                 if (probe != null) {
-                    Class<?> c = probe.getClass();
-                    while (c != null && c != Object.class) {
-                        if (winchHeadIdAccessor == null) winchHeadIdAccessor = grabAccessor(c, "HEAD_ID");
-                        if (winchDistanceToCeilingField == null) winchDistanceToCeilingField = grabFloatField(c, "distanceToCeiling");
-                        if (winchLatchedAccessor == null) winchLatchedAccessor = grabBooleanAccessor(c, "LATCHED");
-                        c = c.getSuperclass();
-                    }
+                    Class<?> probeClass = probe.getClass();
+                    winchHeadIdAccessor = ReflectionHelper.accessor(probeClass, "HEAD_ID");
+                    winchDistanceToCeilingField = ReflectionHelper.declaredField(probeClass, "distanceToCeiling");
+                    winchLatchedAccessor = ReflectionHelper.accessor(probeClass, "LATCHED");
                     try {
                         winchSetHeadUuidMethod = probe.getClass().getMethod("setHeadUUID", UUID.class);
                     } catch (ReflectiveOperationException ignored) {}
@@ -455,43 +459,6 @@ public final class BoundroidPairManager {
             // winchHeadIdAccessor on the companion Winch only, not any Boundroid field.
             reflectionInited = true;
         }
-    }
-
-    private static Field grabFloatField(Class<?> clazz, String name) {
-        try {
-            Field f = clazz.getDeclaredField(name);
-            if (f.getType() == float.class) {
-                f.setAccessible(true);
-                return f;
-            }
-        } catch (NoSuchFieldException ignored) {}
-        return null;
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static EntityDataAccessor<Boolean> grabBooleanAccessor(Class<?> clazz, String name) {
-        try {
-            Field f = clazz.getDeclaredField(name);
-            f.setAccessible(true);
-            Object value = f.get(null);
-            if (value instanceof EntityDataAccessor<?>) {
-                return (EntityDataAccessor<Boolean>) value;
-            }
-        } catch (NoSuchFieldException | IllegalAccessException ignored) {}
-        return null;
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static EntityDataAccessor<Integer> grabAccessor(Class<?> clazz, String name) {
-        try {
-            Field f = clazz.getDeclaredField(name);
-            f.setAccessible(true);
-            Object value = f.get(null);
-            if (value instanceof EntityDataAccessor<?>) {
-                return (EntityDataAccessor<Integer>) value;
-            }
-        } catch (NoSuchFieldException | IllegalAccessException ignored) {}
-        return null;
     }
 
     /** Functional interface so partner lookups can resolve dynamically. */

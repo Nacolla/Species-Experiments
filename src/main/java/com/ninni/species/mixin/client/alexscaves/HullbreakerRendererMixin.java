@@ -9,11 +9,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/**
- * Soft-dep mixin: in {@code HullbreakerRenderer.render}, redirects the GETFIELD of {@code sepia}
- * (the line {@code this.model.straighten = sepia;}) to return true when
- * {@link ModelStraightenBridge#FORCE_STRAIGHTEN} is set, forcing straighten without flipping sepia.
- */
+/** Soft-dep mixin: in {@code HullbreakerRenderer.render}, redirects {@code GETFIELD sepia} to
+ *  true while {@link ModelStraightenBridge#FORCE_STRAIGHTEN} is set, so {@code straighten} flips
+ *  on without flipping the sepia render. */
 @Pseudo
 @Mixin(targets = "com.github.alexmodguy.alexscaves.client.render.entity.HullbreakerRenderer", remap = false)
 public abstract class HullbreakerRendererMixin {

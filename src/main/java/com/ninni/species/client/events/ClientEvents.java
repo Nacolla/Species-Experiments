@@ -91,6 +91,14 @@ public class ClientEvents {
     public void clientTick(TickEvent.ClientTickEvent event) {
         Minecraft mc = Minecraft.getInstance();
 
+        // Disguise special-action key (edge-triggered): forwards to server which fans out to
+        // all tracking clients. See DisguiseSpecialActionPacket.
+        if (event.phase == TickEvent.Phase.END && mc.player != null) {
+            while (SpeciesKeyMappings.DISGUISE_ACTION_KEY.consumeClick()) {
+                SpeciesNetwork.INSTANCE.sendToServer(new com.ninni.species.server.packet.DisguiseSpecialActionPacket());
+            }
+        }
+
         //Code taken and modified from Alex
         if (event.phase == TickEvent.Phase.END) {
             Entity cameraEntity = mc.getCameraEntity();
@@ -426,6 +434,7 @@ public class ClientEvents {
     public static void registerKeys(RegisterKeyMappingsEvent event) {
         event.register(SpeciesKeyMappings.EXTEND_KEY);
         event.register(SpeciesKeyMappings.RETRACT_KEY);
+        event.register(SpeciesKeyMappings.DISGUISE_ACTION_KEY);
     }
 
     @SubscribeEvent

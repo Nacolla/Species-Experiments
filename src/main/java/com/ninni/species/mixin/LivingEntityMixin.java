@@ -43,10 +43,8 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
     private @Unique LivingEntity disguisedEntity;
     private @Unique String lastDisguiseId;
 
-    // Snapshot pre-baseTick rotation history. baseTick ends with yBodyRotO = yBodyRot etc.,
-    // destroying the delta that Citadel-style chain buffers (IaF dragon tail/neck) require.
-    // Snapshot before baseTick, restore after, so the wearer's delta survives into
-    // dragon tick logic that runs after super.tick() returns.
+    /** Snapshot pre-baseTick rotation deltas; baseTick zeroes them and Citadel chain buffers
+     *  (IaF dragon tail/neck) need the delta to survive into post-super.tick logic. */
     private @Unique float species$snapshotYBodyRotO;
     private @Unique float species$snapshotYHeadRotO;
     private @Unique float species$snapshotYRotO;
@@ -60,8 +58,6 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
 
     @Inject(method = "baseTick", at = @At("HEAD"))
     private void species$snapshotRotationDelta(CallbackInfo ci) {
-        // Clear unconditionally so a flag left set by a prior baseTick that threw
-        // (RETURN inject skipped) cannot make the next RETURN restore stale values.
         species$shouldRestoreRotationDelta = false;
         LivingEntity self = (LivingEntity) (Object) this;
         if (!self.getTags().contains(com.ninni.species.client.events.WickedMaskDisguiseEvents.DISGUISE_TAG)) return;
@@ -129,26 +125,12 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
             return;
         }
         CompoundTag tag = headItem.getTag();
-        String currentId = (headItem.is(SpeciesItems.WICKED_MASK.get()) && tag != null && tag.contains("id"))
+        String capturedId = (headItem.is(SpeciesItems.WICKED_MASK.get()) && tag != null && tag.contains("id"))
                 ? tag.getString("id") : null;
 
-        if (currentId == null) {
+        if (capturedId == null) {
             if (this.getDisguisedEntity() != null || this.getDisguisedEntityType() != null) {
-                LivingEntity oldDisguise = this.getDisguisedEntity();
-                if (oldDisguise != null) {
-                    try {
-                        com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(oldDisguise)
-                                .onDestroyed((LivingEntity) (Object) this, oldDisguise);
-                    } catch (Throwable t) {
-                        com.ninni.species.server.disguise.DisguiseLogging.rateLimited(
-                                "behavior.onDestroyed", t);
-                    }
-                    species$removeWearerEffects((LivingEntity) (Object) this, oldDisguise);
-                }
-                com.ninni.species.server.disguise.GumWormSegmentManager.removeSegments((LivingEntity) (Object) this);
-                com.ninni.species.server.disguise.BoundroidPairManager.removeCompanion((LivingEntity) (Object) this);
-                com.ninni.species.server.disguise.MineGuardianAnchorManager.removeAnchor((LivingEntity) (Object) this);
-                com.ninni.species.server.disguise.DisguiseBodyRegistry.unregister(oldDisguise);
+                species$cleanupOldDisguise(this.getDisguisedEntity());
                 this.setDisguisedEntity(null);
                 this.setDisguisedEntityType(null);
                 this.lastDisguiseId = null;
@@ -156,69 +138,30 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
             return;
         }
 
+        // Segment-to-head redirect: chain segments imprint with both ids; the config flag picks
+        // which one drives the disguise. lastDisguiseId tracks the effective id, so toggling the
+        // config triggers reinstantiation automatically.
+        String currentId = capturedId;
+        if (tag != null && tag.contains("species:head_id")) {
+            boolean redirect;
+            try { redirect = com.ninni.species.registry.SpeciesConfig.REDIRECT_SEGMENT_TO_HEAD.get(); }
+            catch (Throwable ignored) { redirect = true; }
+            if (redirect) currentId = tag.getString("species:head_id");
+        }
+
         if (!currentId.equals(this.lastDisguiseId) || this.getDisguisedEntity() == null) {
-            LivingEntity oldDisguise = this.getDisguisedEntity();
-            if (oldDisguise != null) {
-                try {
-                    com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(oldDisguise)
-                            .onDestroyed((LivingEntity) (Object) this, oldDisguise);
-                } catch (Throwable t) {
-                    com.ninni.species.server.disguise.DisguiseLogging.rateLimited(
-                            "behavior.onDestroyed", t);
-                }
-                species$removeWearerEffects((LivingEntity) (Object) this, oldDisguise);
-            }
-            com.ninni.species.server.disguise.GumWormSegmentManager.removeSegments((LivingEntity) (Object) this);
-            com.ninni.species.server.disguise.BoundroidPairManager.removeCompanion((LivingEntity) (Object) this);
-            com.ninni.species.server.disguise.MineGuardianAnchorManager.removeAnchor((LivingEntity) (Object) this);
-            com.ninni.species.server.disguise.DisguiseBodyRegistry.unregister(oldDisguise);
+            species$cleanupOldDisguise(this.getDisguisedEntity());
             Optional<EntityType<?>> entityType = EntityType.byString(currentId);
             if (entityType.isPresent()) {
                 Entity rawEntity = entityType.get().create(this.level());
                 if (rawEntity instanceof LivingEntity living) {
-                    // Entity.load already dispatches readAdditionalSaveData; mob NBT is read once.
-                    living.load(tag);
-                    if (living instanceof Mob mob) {
-                        // Clear AI: Mob.aiStep ticks goals unconditionally; AC attack goals mutate
-                        // animation state without re-checking canUse. Behaviors that write state directly
-                        // (e.g. AutoFlightSync) are unaffected; re-add via onCreated() if needed.
-                        try {
-                            mob.goalSelector.removeAllGoals(g -> true);
-                            mob.targetSelector.removeAllGoals(g -> true);
-                        } catch (Throwable ignored) {}
-                    }
-                    living.addTag(com.ninni.species.client.events.WickedMaskDisguiseEvents.DISGUISE_TAG);
-                    living.setSilent(!com.ninni.species.registry.SpeciesConfig.PLAY_DISGUISE_SOUNDS.get());
-                    // Must never die: death triggers dropAllDeathLoot (real ItemEntities) and
-                    // freezes the tick (no more sound/pose updates).
-                    living.setInvulnerable(true);
-                    try {
-                        com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(living)
-                                .onCreated((LivingEntity) (Object) this, living);
-                    } catch (Throwable ignored) {}
-                    // Apply cosmetic wearer-effects on the equip transition.
-                    if (!this.level().isClientSide) {
-                        try {
-                            LivingEntity selfWearer = (LivingEntity) (Object) this;
-                            com.ninni.species.api.disguise.DisguiseCosmetics cosmetics =
-                                    com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticRegistry.get(living);
-                            for (net.minecraft.world.effect.MobEffectInstance e : cosmetics.wearerEffectsWhileWorn(selfWearer, living)) {
-                                selfWearer.addEffect(new net.minecraft.world.effect.MobEffectInstance(e));
-                            }
-                        } catch (Throwable ignored) {}
-                    }
+                    // Skip load on redirect — segment save data would write nonsense onto a fresh head.
+                    boolean redirected = !currentId.equals(capturedId);
+                    species$configureNewDisguise(living, redirected ? new CompoundTag() : tag);
                     this.setDisguisedEntity(living);
                     this.setDisguisedEntityType(entityType.get());
                     this.lastDisguiseId = currentId;
-                    // Register so id-tracking particle systems resolve via ClientLevelMixin fallback.
-                    com.ninni.species.server.disguise.DisguiseBodyRegistry.register(living, (LivingEntity) (Object) this);
-                    // Companion managers — each gates internally on type and side.
-                    com.ninni.species.server.disguise.GumWormSegmentManager
-                            .onDisguiseCreated((LivingEntity) (Object) this, living);
-                    com.ninni.species.server.disguise.BoundroidPairManager
-                            .onDisguiseCreated((LivingEntity) (Object) this, living);
-                    com.ninni.species.server.disguise.MineGuardianAnchorManager
-                            .onDisguiseCreated((LivingEntity) (Object) this, living);
+                    species$wireNewDisguise(living);
                 } else {
                     this.setDisguisedEntity(null);
                     this.setDisguisedEntityType(null);
@@ -236,8 +179,6 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
 
     @Unique
     private void tickDisguise() {
-        // Ticks both sides: server tick broadcasts mob ambient/hurt sounds. Death-side leaks
-        // are blocked by setInvulnerable + per-tick health reset; world mutations by removeAllGoals.
         LivingEntity disguise = this.getDisguisedEntity();
         if (disguise == null || disguise.isRemoved()) return;
 
@@ -246,8 +187,13 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
 
         LivingEntity self = (LivingEntity) (Object) this;
 
-        // Snapshot wearer pos before disguise.tick — aiStep's pushEntities accumulates impulse
-        // on the real wearer; restore after to isolate it.
+        // Armor stand statue: skip behavior + disguise.tick; HeadPose drives rotation.
+        if (self instanceof net.minecraft.world.entity.decoration.ArmorStand armorStand) {
+            tickStaticDisguiseFromArmorStand(armorStand, disguise);
+            return;
+        }
+
+        // Snapshot wearer pos to isolate disguise's aiStep pushEntities impulse.
         double wearerX = self.getX();
         double wearerY = self.getY();
         double wearerZ = self.getZ();
@@ -258,6 +204,10 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         boolean shouldApplyXRot = behavior.shouldApplyXRot(self, disguise, false);
         float xRotForDisguise = shouldApplyXRot ? self.getXRot() : 0.0F;
         float xRotOForDisguise = shouldApplyXRot ? self.xRotO : 0.0F;
+        // Snake/worm chains need camera-yaw to keep the head from freezing while segments swing.
+        boolean bodyTracksCamera = behavior.bodyYawTracksCamera(disguise);
+        float yBodyRotForDisguise = (bodyTracksCamera ? self.getYRot() : self.yBodyRot) + yawOffset;
+        float yBodyRotOForDisguise = (bodyTracksCamera ? self.yRotO : self.yBodyRotO) + yawOffset;
 
         disguise.setPos(self.getX(), self.getY(), self.getZ());
         disguise.xo = self.xo;
@@ -268,20 +218,18 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         disguise.yRotO = self.yRotO + yawOffset;
         disguise.setXRot(xRotForDisguise);
         disguise.xRotO = xRotOForDisguise;
-        disguise.yBodyRot = self.yBodyRot + yawOffset;
-        disguise.yBodyRotO = self.yBodyRotO + yawOffset;
+        disguise.yBodyRot = yBodyRotForDisguise;
+        disguise.yBodyRotO = yBodyRotOForDisguise;
         disguise.yHeadRot = self.yHeadRot + yawOffset;
         disguise.yHeadRotO = self.yHeadRotO + yawOffset;
         disguise.setOnGround(self.onGround());
 
-        // Propagate movement-state flags so renderers (vanilla, GeckoLib, Citadel, LionFish)
-        // pick up the correct animation track via setupAnim without per-renderer integration.
+        // Sync movement flags so renderers pick the right animation track via setupAnim.
         disguise.setSharedFlag(7, self.isFallFlying()); // FALL_FLYING
         disguise.setSwimming(self.isSwimming());
         disguise.setSprinting(self.isSprinting());
 
-        // Defend against state changes that setInvulnerable doesn't cover: direct setHealth
-        // calls (Slime split, drowning), accumulated fallDistance, lingering hurt animation.
+        // Reset health/animation state not covered by setInvulnerable.
         disguise.fallDistance = 0;
         disguise.hurtTime = 0;
         disguise.deathTime = 0;
@@ -289,16 +237,11 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
             disguise.setHealth(disguise.getMaxHealth());
         }
 
-        try {
-            behavior.preTick(self, disguise);
-        } catch (Throwable t) {
-            com.ninni.species.server.disguise.DisguiseLogging.rateLimited(
-                    "behavior.preTick:" + behavior.getClass().getName(), t);
-        }
+        com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                "behavior.preTick:" + behavior.getClass().getName(),
+                () -> behavior.preTick(self, disguise));
 
-        // Suppress particles emitted during disguise.tick() for the local first-person
-        // wearer — disguise mouth is near the camera for tall mobs. See DisguiseTickContext.
-        // Third-person and remote wearers are unaffected; context is per-thread.
+        // Suppress disguise.tick particles near camera for first-person wearer (per-thread context).
         boolean suppressDisguiseParticles = self.level().isClientSide
                 && com.ninni.species.client.events.LocalFirstPersonCheck.isLocalFirstPersonWearer(self);
         if (suppressDisguiseParticles) {
@@ -315,12 +258,9 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
             }
         }
 
-        try {
-            behavior.postTick(self, disguise);
-        } catch (Throwable t) {
-            com.ninni.species.server.disguise.DisguiseLogging.rateLimited(
-                    "behavior.postTick:" + behavior.getClass().getName(), t);
-        }
+        com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                "behavior.postTick:" + behavior.getClass().getName(),
+                () -> behavior.postTick(self, disguise));
 
         // Restore wearer state — neutralize push/teleport from disguise's aiStep.
         if (self.getX() != wearerX || self.getY() != wearerY || self.getZ() != wearerZ) {
@@ -328,8 +268,7 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         }
         self.setDeltaMovement(wearerDelta);
 
-        // Multipart realign: setPos snaps the body but parts stay at AI-moved positions; translate
-        // each part by the delta back onto the wearer.
+        // Realign multipart parts to wearer position (AI-moved otherwise).
         double dx = self.getX() - disguise.getX();
         double dy = self.getY() - disguise.getY();
         double dz = self.getZ() - disguise.getZ();
@@ -345,19 +284,17 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
             disguise.setPos(self.getX(), self.getY(), self.getZ());
         }
 
-        // Re-sync rotation history: disguise.tick zeros yBodyRotO=yBodyRot etc.; restore from wearer.
+        // Restore rotation state zeroed by disguise.tick.
         disguise.setDeltaMovement(self.getDeltaMovement());
         disguise.yRotO = self.yRotO + yawOffset;
         disguise.setYRot(self.getYRot() + yawOffset);
         disguise.xRotO = xRotOForDisguise;
         disguise.setXRot(xRotForDisguise);
-        disguise.yBodyRotO = self.yBodyRotO + yawOffset;
-        disguise.yBodyRot = self.yBodyRot + yawOffset;
+        disguise.yBodyRotO = yBodyRotOForDisguise;
+        disguise.yBodyRot = yBodyRotForDisguise;
         disguise.yHeadRotO = self.yHeadRotO + yawOffset;
         disguise.yHeadRot = self.yHeadRot + yawOffset;
 
-        // Companion managers — each gates internally on type and side.
-        com.ninni.species.server.disguise.GumWormSegmentManager.tickSegments(self);
         com.ninni.species.server.disguise.BoundroidPairManager.tickCompanion(self);
         com.ninni.species.server.disguise.MineGuardianAnchorManager.tickAnchor(self);
 
@@ -382,7 +319,60 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
 
     }
 
-    /** Removes the cosmetic's wearer-effects. Called on un-equip / swap. */
+    /** Static armor-stand tick: position/rotation from the stand, no {@code disguise.tick};
+     *  {@code behavior.preTick} still runs for segment-chain managers. */
+    @Unique
+    private void tickStaticDisguiseFromArmorStand(net.minecraft.world.entity.decoration.ArmorStand stand, LivingEntity disguise) {
+        com.ninni.species.api.disguise.DisguiseBehavior behavior =
+                com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(disguise);
+        float yawOffset = behavior.yawOffset(disguise);
+
+        disguise.setPos(stand.getX(), stand.getY(), stand.getZ());
+        disguise.xo = stand.xo;
+        disguise.yo = stand.yo;
+        disguise.zo = stand.zo;
+        disguise.xOld = stand.xOld;
+        disguise.yOld = stand.yOld;
+        disguise.zOld = stand.zOld;
+        disguise.setDeltaMovement(Vec3.ZERO);
+
+        net.minecraft.core.Rotations head = stand.getHeadPose();
+        // HeadPose drives the whole-body facing direction so segment chains (Centipede, Anaconda,
+        // VoidWorm, GumWorm) trail in the direction the head is looking. Non-chain mobs end up
+        // with head/body aligned (head-bone delta = 0), which reads as "the disguise faces where
+        // the stand's head pose points" — coherent with statue intent.
+        float poseYaw = stand.getYRot() + head.getY() + yawOffset;
+        float poseYawO = stand.yRotO + head.getY() + yawOffset;
+
+        disguise.setYRot(poseYaw);
+        disguise.yRotO = poseYawO;
+        disguise.yBodyRot = poseYaw;
+        disguise.yBodyRotO = poseYawO;
+        disguise.yHeadRot = poseYaw;
+        disguise.yHeadRotO = poseYawO;
+        disguise.setXRot(head.getX());
+        disguise.xRotO = head.getX();
+        disguise.setOnGround(stand.onGround());
+
+        disguise.walkAnimation.speed = 0;
+        disguise.walkAnimation.speedOld = 0;
+        disguise.walkAnimation.position = 0;
+
+        disguise.fallDistance = 0;
+        disguise.hurtTime = 0;
+        disguise.deathTime = 0;
+        if (disguise.getHealth() < disguise.getMaxHealth()) {
+            disguise.setHealth(disguise.getMaxHealth());
+        }
+
+        // Segment-chain managers tick their segments via preTick to follow the stand's pose.
+        // disguise.tick() is still skipped so idle anims/particles/cooldowns stay frozen.
+        com.ninni.species.server.disguise.util.BehaviorHooks.run(
+                "behavior.preTick(armorStand):" + behavior.getClass().getName(),
+                () -> behavior.preTick((LivingEntity) (Object) this, disguise));
+    }
+
+    /** Remove cosmetic wearer-effects. */
     @Unique
     private void species$removeWearerEffects(LivingEntity self, LivingEntity disguise) {
         try {
@@ -394,8 +384,66 @@ public abstract class LivingEntityMixin extends Entity implements LivingEntityAc
         } catch (Throwable ignored) {}
     }
 
-    // Hurt/death sound cosmetic hooks live in PlayerMixin: Player overrides those without super,
-    // so an inject on LivingEntity never fires for player wearers.
+    /** Configure a new disguise: load NBT, strip goals, tag, silence, apply effects. */
+    @Unique
+    private void species$configureNewDisguise(LivingEntity living, CompoundTag tag) {
+        living.load(tag);
+        if (living instanceof Mob mob) {
+            // Strip goals so aiStep doesn't drive AI side-effects.
+            try {
+                mob.goalSelector.removeAllGoals(g -> true);
+                mob.targetSelector.removeAllGoals(g -> true);
+            } catch (Throwable ignored) {}
+        }
+        living.addTag(com.ninni.species.client.events.WickedMaskDisguiseEvents.DISGUISE_TAG);
+        living.setSilent(!com.ninni.species.registry.SpeciesConfig.PLAY_DISGUISE_SOUNDS.get());
+        // Must never die — death triggers dropAllDeathLoot and freezes the tick.
+        living.setInvulnerable(true);
+        try {
+            com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(living)
+                    .onCreated((LivingEntity) (Object) this, living);
+        } catch (Throwable ignored) {}
+        if (!this.level().isClientSide) {
+            try {
+                LivingEntity selfWearer = (LivingEntity) (Object) this;
+                com.ninni.species.api.disguise.DisguiseCosmetics cosmetics =
+                        com.ninni.species.server.disguise.cosmetic.DisguiseCosmeticRegistry.get(living);
+                for (net.minecraft.world.effect.MobEffectInstance e : cosmetics.wearerEffectsWhileWorn(selfWearer, living)) {
+                    selfWearer.addEffect(new net.minecraft.world.effect.MobEffectInstance(e));
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    /** Register the disguise body in the global registry + segment/anchor companion managers. */
+    @Unique
+    private void species$wireNewDisguise(LivingEntity living) {
+        com.ninni.species.server.disguise.DisguiseBodyRegistry.register(living, (LivingEntity) (Object) this);
+        com.ninni.species.server.disguise.BoundroidPairManager.onDisguiseCreated((LivingEntity) (Object) this, living);
+        com.ninni.species.server.disguise.MineGuardianAnchorManager.onDisguiseCreated((LivingEntity) (Object) this, living);
+        // Armor stand wearers: disable frustum culling so far-extending segments stay visible.
+        if ((Object) this instanceof net.minecraft.world.entity.decoration.ArmorStand) {
+            this.noCulling = true;
+        }
+    }
+
+    /** Clean up a disguise body: fire {@code onDestroyed}, remove cosmetic effects, unregister.
+     *  Tolerant to a null {@code oldDisguise}. */
+    @Unique
+    private void species$cleanupOldDisguise(@Nullable LivingEntity oldDisguise) {
+        if (oldDisguise != null) {
+            com.ninni.species.server.disguise.util.BehaviorHooks.run("behavior.onDestroyed",
+                    () -> com.ninni.species.server.disguise.DisguiseBehaviorRegistry.get(oldDisguise)
+                            .onDestroyed((LivingEntity) (Object) this, oldDisguise));
+            species$removeWearerEffects((LivingEntity) (Object) this, oldDisguise);
+        }
+        com.ninni.species.server.disguise.BoundroidPairManager.removeCompanion((LivingEntity) (Object) this);
+        com.ninni.species.server.disguise.MineGuardianAnchorManager.removeAnchor((LivingEntity) (Object) this);
+        com.ninni.species.server.disguise.DisguiseBodyRegistry.unregister(oldDisguise);
+        if ((Object) this instanceof net.minecraft.world.entity.decoration.ArmorStand) {
+            this.noCulling = false;
+        }
+    }
 
     @Inject(method = "jumpFromGround", at = @At("HEAD"), cancellable = true)
     public void applyBirtd(CallbackInfo ci) {

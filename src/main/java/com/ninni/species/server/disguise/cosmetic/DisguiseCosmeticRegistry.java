@@ -55,7 +55,13 @@ public final class DisguiseCosmeticRegistry {
     /** Composed result for the disguise's type, never null. */
     public static DisguiseCosmetics get(LivingEntity disguise) {
         if (disguise == null) return DefaultDisguiseCosmetics.INSTANCE;
-        return COMPOSED_CACHE.computeIfAbsent(disguise.getType(), DisguiseCosmeticRegistry::compute);
+        return get(disguise.getType());
+    }
+
+    /** Composed result for an entity type, never null. */
+    public static DisguiseCosmetics get(EntityType<?> type) {
+        if (type == null) return DefaultDisguiseCosmetics.INSTANCE;
+        return COMPOSED_CACHE.computeIfAbsent(type, DisguiseCosmeticRegistry::compute);
     }
 
     private static DisguiseCosmetics compute(EntityType<?> type) {

@@ -40,11 +40,8 @@ public class WickedMaskDisguiseEvents {
         }
     }
 
-    /**
-     * Cancels block destruction performed by a disguise (e.g. Cataclysm's Ancient Remnant
-     * which bypasses the mob griefing gameRule via its own config flag but still goes
-     * through the destroy event hook).
-     */
+    /** Cancels disguise-driven block destruction (e.g. Cataclysm Ancient Remnant bypasses the
+     *  mob-griefing gameRule via its own flag but still fires this hook). */
     @SubscribeEvent
     public static void onLivingDestroyBlock(LivingDestroyBlockEvent event) {
         if (isDisguise(event.getEntity())) {

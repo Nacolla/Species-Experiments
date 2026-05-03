@@ -13,14 +13,17 @@ public final class DisguiseTickContext {
 
     private DisguiseTickContext() {}
 
+    @ApiStatus.Internal
     public static void pushSuppress() {
         SUPPRESS_DEPTH.set(SUPPRESS_DEPTH.get() + 1);
     }
 
+    @ApiStatus.Internal
     public static void popSuppress() {
         SUPPRESS_DEPTH.set(Math.max(0, SUPPRESS_DEPTH.get() - 1));
     }
 
+    @ApiStatus.Internal
     public static boolean isSuppressing() {
         return SUPPRESS_DEPTH.get() > 0;
     }

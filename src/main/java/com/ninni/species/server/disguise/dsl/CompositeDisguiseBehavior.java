@@ -7,7 +7,7 @@ import org.slf4j.Logger;
 
 /**
  * Composes multiple {@link DisguiseBehavior}s; action hooks run in registration order,
- * scalar hooks ({@code yawOffset}/{@code shouldApplyXRot}/{@code preserveRotationDeltaInAiStep}) return first non-default.
+ * scalar hooks ({@code yawOffset}/{@code shouldApplyXRot}/{@code preserveRotationDeltaInAiStep}/{@code bodyYawTracksCamera}) return first non-default.
  */
 public final class CompositeDisguiseBehavior implements DisguiseBehavior {
 
@@ -132,6 +132,35 @@ public final class CompositeDisguiseBehavior implements DisguiseBehavior {
             if (!b.preserveRotationDeltaInAiStep()) return false;
         }
         return true;
+    }
+
+    @Override
+    public void onSpecialAction(LivingEntity wearer, LivingEntity disguise,
+                                com.ninni.species.api.disguise.ActionContext context) {
+        for (DisguiseBehavior b : behaviors) {
+            try { b.onSpecialAction(wearer, disguise, context); }
+            catch (Throwable t) { rateLimitedLog(b, 9, "onSpecialAction", t); }
+        }
+    }
+
+    @Override
+    public float renderYOffset(LivingEntity wearer, LivingEntity disguise, float partialTick) {
+        // Sum offsets across children — multiple behaviors can independently nudge Y.
+        float total = 0F;
+        for (DisguiseBehavior b : behaviors) {
+            try { total += b.renderYOffset(wearer, disguise, partialTick); }
+            catch (Throwable t) { rateLimitedLog(b, 8, "renderYOffset", t); }
+        }
+        return total;
+    }
+
+    @Override
+    public boolean bodyYawTracksCamera(LivingEntity disguise) {
+        // Default is false. Any child opting in wins.
+        for (DisguiseBehavior b : behaviors) {
+            if (b.bodyYawTracksCamera(disguise)) return true;
+        }
+        return false;
     }
 
     /** Sentinel used to compute interface defaults for first-non-default-wins dispatch. */
